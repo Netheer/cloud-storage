@@ -1,8 +1,21 @@
+import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 
-async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-  await app.listen(process.env.PORT ?? 3000);
+const logger = new Logger('WorkerBootstrap');
+
+async function bootstrap(): Promise<void> {
+  const app = await NestFactory.createApplicationContext(AppModule, {
+    bufferLogs: true,
+  });
+
+  app.enableShutdownHooks();
+  logger.log('Worker application started');
 }
-bootstrap();
+
+void bootstrap().catch((error: unknown) => {
+  const stack = error instanceof Error ? error.stack : String(error);
+
+  logger.error('Failed to start worker', stack);
+  process.exitCode = 1;
+});

@@ -4,11 +4,15 @@
   "private": true,
   "packageManager": "pnpm@11.17.0",
   "scripts": {
+    "dev": "concurrently --kill-others-on-fail --names API,WORKER,WEB --prefix-colors blue,magenta,green \"pnpm dev:api\" \"pnpm dev:worker\" \"pnpm dev:web\"",
     "dev:api": "pnpm --filter api start:dev",
     "dev:worker": "pnpm --filter worker start:dev",
     "dev:web": "pnpm --filter web dev",
     "build": "pnpm -r --if-present run build",
     "lint": "pnpm -r --if-present run lint",
     "test": "pnpm -r --if-present run test"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.3"
   }
 }
