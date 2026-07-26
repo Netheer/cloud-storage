@@ -1,0 +1,147 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum FileStatus {
+  UPLOADING
+  PROCESSING
+  READY
+  FAILED
+  DELETED
+}
+
+enum UploadStatus {
+  CREATED
+  UPLOADING
+  COMPLETING
+  COMPLETED
+  ABORTED
+  EXPIRED
+  FAILED
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String
+  displayName  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  folders Folder[]
+  files   File[]
+  uploads UploadSession[]
+}
+
+model Folder {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  ownerId   String   @db.Uuid
+  parentId  String?  @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner    User       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  parent   Folder?    @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children Folder[]   @relation("FolderHierarchy")
+  files    File[]
+  uploads  UploadSession[]
+
+  @@index([ownerId])
+  @@index([parentId])
+}
+
+model File {
+  id               String      @id @default(uuid()) @db.Uuid
+  name             String
+  ownerId          String      @db.Uuid
+  folderId         String?     @db.Uuid
+  currentVersionId String?     @unique @db.Uuid
+  status           FileStatus  @default(UPLOADING)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  deletedAt        DateTime?
+
+  owner          User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  folder         Folder?         @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  versions       FileVersion[]   @relation("FileVersions")
+  currentVersion FileVersion?    @relation("CurrentFileVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  uploads        UploadSession[]
+
+  @@index([ownerId])
+  @@index([folderId])
+}
+
+model FileVersion {
+  id             String   @id @default(uuid()) @db.Uuid
+  fileId         String   @db.Uuid
+  storedObjectId String   @db.Uuid
+  versionNumber  Int
+  originalName   String
+  mimeType       String?
+  size           BigInt
+  createdAt      DateTime @default(now())
+
+  file         File         @relation("FileVersions", fields: [fileId], references: [id], onDelete: Cascade)
+  storedObject StoredObject @relation(fields: [storedObjectId], references: [id], onDelete: Restrict)
+  currentFor   File?        @relation("CurrentFileVersion")
+
+  @@unique([fileId, versionNumber])
+  @@index([storedObjectId])
+}
+
+model StoredObject {
+  id             String   @id @default(uuid()) @db.Uuid
+  objectKey      String   @unique
+  sha256         String?
+  size           BigInt
+  referenceCount Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  versions FileVersion[]
+
+  @@unique([sha256, size])
+}
+
+model UploadSession {
+  id                String       @id @default(uuid()) @db.Uuid
+  ownerId           String       @db.Uuid
+  folderId          String?      @db.Uuid
+  fileId            String?      @db.Uuid
+  objectKey         String       @unique
+  originalName      String
+  mimeType          String?
+  totalSize         BigInt
+  multipartUploadId String?
+  status            UploadStatus @default(CREATED)
+  expiresAt         DateTime
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  owner  User         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  folder Folder?      @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  file   File?        @relation(fields: [fileId], references: [id], onDelete: SetNull)
+  parts  UploadPart[]
+
+  @@index([ownerId])
+  @@index([status, expiresAt])
+}
+
+model UploadPart {
+  id              String   @id @default(uuid()) @db.Uuid
+  uploadSessionId String   @db.Uuid
+  partNumber      Int
+  etag            String
+  size            BigInt
+  createdAt       DateTime @default(now())
+
+  uploadSession UploadSession @relation(fields: [uploadSessionId], references: [id], onDelete: Cascade)
+
+  @@unique([uploadSessionId, partNumber])
+}
