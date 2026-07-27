@@ -1,10 +1,13 @@
 import {
   Controller,
   Get,
+  Inject,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
 import { RedisService } from '../redis/redis.service';
+import { OBJECT_STORAGE } from '../storage/object-storage.interface';
+import type { ObjectStorage } from '../storage/object-storage.interface';
 
 type ServiceHealth =
   | {
@@ -20,18 +23,23 @@ export class HealthController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+
+    @Inject(OBJECT_STORAGE)
+    private readonly objectStorage: ObjectStorage,
   ) {}
 
   @Get()
   async check() {
-    const [postgres, redis] = await Promise.all([
+    const [postgres, redis, storage] = await Promise.all([
       this.checkPostgres(),
       this.checkRedis(),
+      this.checkObjectStorage(),
     ]);
 
     const services = {
       postgres,
       redis,
+      storage,
     };
 
     const isHealthy = Object.values(services).every(
@@ -75,6 +83,23 @@ export class HealthController {
       await this.redis.ping();
 
       return {
+        status: 'up',
+        latencyMs: Date.now() - startedAt,
+      };
+    } catch {
+      return {
+        status: 'down',
+      };
+    }
+  }
+
+  private async checkObjectStorage(): Promise<ServiceHealth> {
+  const startedAt = Date.now();
+
+  try {
+    await this.objectStorage.checkHealth();
+
+    return {
         status: 'up',
         latencyMs: Date.now() - startedAt,
       };
