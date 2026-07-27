@@ -8,6 +8,8 @@ import { PrismaService } from '../database/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { OBJECT_STORAGE } from '../storage/object-storage.interface';
 import type { ObjectStorage } from '../storage/object-storage.interface';
+import { ApiOkResponse, ApiOperation, ApiServiceUnavailableResponse, ApiTags } from '@nestjs/swagger';
+import { HealthResponseDto } from './dto/health-response.dto';
 
 type ServiceHealth =
   | {
@@ -18,6 +20,7 @@ type ServiceHealth =
       status: 'down';
     };
 
+@ApiTags('Health')
 @Controller('health')
 export class HealthController {
   constructor(
@@ -29,6 +32,20 @@ export class HealthController {
   ) {}
 
   @Get()
+  @ApiOperation({
+    summary: 'Check infrastructure health',
+    description:
+      'Checks PostgreSQL, Redis and object storage availability.',
+    })
+  @ApiOkResponse({
+    description: 'All infrastructure services are available.',
+    type: HealthResponseDto,
+    })
+  @ApiServiceUnavailableResponse({
+    description:
+      'At least one infrastructure service is unavailable.',
+    type: HealthResponseDto,
+  })
   async check() {
     const [postgres, redis, storage] = await Promise.all([
       this.checkPostgres(),
