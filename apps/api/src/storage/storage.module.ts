@@ -1,10 +1,6 @@
 import { Module } from '@nestjs/common';
-import {
-  OBJECT_STORAGE,
-} from './object-storage.interface';
-import {
-  S3ObjectStorageService,
-} from './s3-object-storage.service';
+import { OBJECT_STORAGE } from './object-storage.interface';
+import { S3ObjectStorageService } from './s3-object-storage.service';
 
 @Module({
   providers: [

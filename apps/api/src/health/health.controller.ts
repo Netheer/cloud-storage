@@ -8,7 +8,12 @@ import { PrismaService } from '../database/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { OBJECT_STORAGE } from '../storage/object-storage.interface';
 import type { ObjectStorage } from '../storage/object-storage.interface';
-import { ApiOkResponse, ApiOperation, ApiServiceUnavailableResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiOkResponse,
+  ApiOperation,
+  ApiServiceUnavailableResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { HealthResponseDto } from './dto/health-response.dto';
 
 type ServiceHealth =
@@ -34,16 +39,14 @@ export class HealthController {
   @Get()
   @ApiOperation({
     summary: 'Check infrastructure health',
-    description:
-      'Checks PostgreSQL, Redis and object storage availability.',
-    })
+    description: 'Checks PostgreSQL, Redis and object storage availability.',
+  })
   @ApiOkResponse({
     description: 'All infrastructure services are available.',
     type: HealthResponseDto,
-    })
+  })
   @ApiServiceUnavailableResponse({
-    description:
-      'At least one infrastructure service is unavailable.',
+    description: 'At least one infrastructure service is unavailable.',
     type: HealthResponseDto,
   })
   async check() {
@@ -111,12 +114,12 @@ export class HealthController {
   }
 
   private async checkObjectStorage(): Promise<ServiceHealth> {
-  const startedAt = Date.now();
+    const startedAt = Date.now();
 
-  try {
-    await this.objectStorage.checkHealth();
+    try {
+      await this.objectStorage.checkHealth();
 
-    return {
+      return {
         status: 'up',
         latencyMs: Date.now() - startedAt,
       };

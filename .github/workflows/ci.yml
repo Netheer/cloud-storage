@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate project
+    runs-on: ubuntu-latest
+
+    env:
+      CI: "true"
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/cloud_storage?schema=public
+
+      VITE_API_URL: http://localhost:3000
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Prisma schema
+        run: pnpm db:validate
+
+      - name: Generate Prisma Client
+        run: pnpm db:generate
+
+      - name: Run lint
+        run: pnpm lint
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Build project
+        run: pnpm build

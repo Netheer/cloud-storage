@@ -12,22 +12,20 @@ async function bootstrap() {
     origin: configService.getOrThrow<string>('WEB_ORIGIN'),
     credentials: true,
   });
-  
+
   const swaggerConfig = new DocumentBuilder()
-  .setTitle('Cloud Storage API')
-  .setDescription(
-    'Backend API for the cloud file storage application.',
-  )
-  .setVersion('0.1.0')
-  .addBearerAuth(
-    {
-      type: 'http',
-      scheme: 'bearer',
-      bearerFormat: 'JWT',
-    },
-    'access-token',
-  )
-  .build();
+    .setTitle('Cloud Storage API')
+    .setDescription('Backend API for the cloud file storage application.')
+    .setVersion('0.1.0')
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+      },
+      'access-token',
+    )
+    .build();
 
   const documentFactory = () =>
     SwaggerModule.createDocument(app, swaggerConfig);

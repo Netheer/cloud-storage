@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  OnModuleDestroy,
-  OnModuleInit,
-} from '@nestjs/common';
+import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient } from 'redis';
 
@@ -12,9 +8,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   constructor(configService: ConfigService) {
     const host = configService.getOrThrow<string>('REDIS_HOST');
-    const port = Number(
-      configService.getOrThrow<string>('REDIS_PORT'),
-    );
+    const port = Number(configService.getOrThrow<string>('REDIS_PORT'));
 
     if (!Number.isInteger(port)) {
       throw new Error('REDIS_PORT must be an integer');
@@ -25,8 +19,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
         host,
         port,
         connectTimeout: 1000,
-        reconnectStrategy: (retries) =>
-          Math.min(100 * 2 ** retries, 3000),
+        reconnectStrategy: (retries) => Math.min(100 * 2 ** retries, 3000),
       },
 
       disableOfflineQueue: true,
