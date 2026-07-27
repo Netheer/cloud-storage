@@ -10,7 +10,11 @@
     "dev:web": "pnpm --filter web dev",
     "build": "pnpm -r --if-present run build",
     "lint": "pnpm -r --if-present run lint",
-    "test": "pnpm -r --if-present run test"
+    "test": "pnpm -r --if-present run test",
+    "db:validate": "pnpm --filter api exec prisma validate",
+    "db:generate": "pnpm --filter api exec prisma generate",
+    "db:migrate": "pnpm --filter api exec prisma migrate dev",
+    "db:studio": "pnpm --filter api exec prisma studio"
   },
   "devDependencies": {
     "concurrently": "^10.0.3"
