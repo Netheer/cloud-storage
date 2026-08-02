@@ -14,7 +14,8 @@
     "db:validate": "pnpm --filter api exec prisma validate",
     "db:generate": "pnpm --filter api exec prisma generate",
     "db:migrate": "pnpm --filter api exec prisma migrate dev",
-    "db:studio": "pnpm --filter api exec prisma studio"
+    "db:studio": "pnpm --filter api exec prisma studio",
+    "db:deploy": "pnpm --filter api exec prisma migrate deploy"
   },
   "devDependencies": {
     "concurrently": "^10.0.3"
