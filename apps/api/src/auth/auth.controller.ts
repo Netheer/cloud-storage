@@ -1,18 +1,21 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Post,
   Req,
   Res,
   UnauthorizedException,
+  UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
   ApiCreatedResponse,
+  ApiBearerAuth,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
@@ -25,6 +28,8 @@ import { AuthService } from './auth.service';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { CurrentUser } from './decorators/current-user.decorator';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 type RequestWithCookies = {
   cookies?: Record<string, unknown>;
@@ -191,5 +196,22 @@ export class AuthController {
       expiresIn: result.expiresIn,
       user: result.user,
     };
+  }
+
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Get the currently authenticated user',
+  })
+  @ApiOkResponse({
+    description: 'Current user returned successfully',
+    type: UserResponseDto,
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Access token is missing, invalid, or expired',
+  })
+  me(@CurrentUser() user: UserResponseDto): UserResponseDto {
+    return user;
   }
 }

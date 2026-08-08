@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+import type { AccessTokenPayload } from './types/access-token-payload.type';
 
 export type RefreshTokenPayload = {
   sub: string;
@@ -47,7 +48,7 @@ export class TokenService {
     email: string,
     sessionId: string = randomUUID(),
   ): Promise<IssuedTokenPair> {
-    const accessPayload = {
+    const accessPayload: AccessTokenPayload = {
       sub: userId,
       sid: sessionId,
       email,
