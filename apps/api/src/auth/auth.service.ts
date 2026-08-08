@@ -10,9 +10,9 @@ import { AuthResponseDto } from './dto/auth-response.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { PasswordService } from './password.service';
-import { TokenService } from './token.service';
+import { RefreshTokenPayload, TokenService } from './token.service';
 
-export type LoginResult = AuthResponseDto & {
+export type AuthResult = AuthResponseDto & {
   refreshToken: string;
 };
 
@@ -49,7 +49,7 @@ export class AuthService {
     }
   }
 
-  async login(dto: LoginDto): Promise<LoginResult> {
+  async login(dto: LoginDto): Promise<AuthResult> {
     const user = await this.usersService.findByEmailForAuth(dto.email);
 
     if (!user) {
@@ -86,6 +86,77 @@ export class AuthService {
         updatedAt: user.updatedAt,
       },
     };
+  }
+
+  async refresh(refreshToken: string): Promise<AuthResult> {
+    const payload = await this.parseRefreshToken(refreshToken);
+
+    const session = await this.authSessionsService.findById(payload.sid);
+
+    if (!session) {
+      throw this.invalidRefreshToken();
+    }
+
+    if (session.userId !== payload.sub) {
+      await this.authSessionsService.revoke(session.id);
+      throw this.invalidRefreshToken();
+    }
+
+    if (
+      session.revokedAt !== null ||
+      session.expiresAt.getTime() <= Date.now()
+    ) {
+      throw this.invalidRefreshToken();
+    }
+
+    const tokenMatches = this.tokenService.refreshTokenMatches(
+      refreshToken,
+      session.refreshTokenHash,
+    );
+
+    if (!tokenMatches) {
+      await this.authSessionsService.revoke(session.id);
+      throw this.invalidRefreshToken();
+    }
+
+    const tokens = await this.tokenService.issueTokenPair(
+      session.user.id,
+      session.user.email,
+      session.id,
+    );
+
+    const rotated = await this.authSessionsService.rotate({
+      id: session.id,
+      currentRefreshTokenHash: session.refreshTokenHash,
+      newRefreshTokenHash: tokens.refreshTokenHash,
+      newExpiresAt: tokens.refreshExpiresAt,
+    });
+
+    if (!rotated) {
+      await this.authSessionsService.revoke(session.id);
+      throw this.invalidRefreshToken();
+    }
+
+    return {
+      accessToken: tokens.accessToken,
+      expiresIn: tokens.accessExpiresIn,
+      refreshToken: tokens.refreshToken,
+      user: session.user,
+    };
+  }
+
+  private async parseRefreshToken(
+    refreshToken: string,
+  ): Promise<RefreshTokenPayload> {
+    try {
+      return await this.tokenService.verifyRefreshToken(refreshToken);
+    } catch {
+      throw this.invalidRefreshToken();
+    }
+  }
+
+  private invalidRefreshToken(): UnauthorizedException {
+    return new UnauthorizedException('Invalid or expired refresh token');
   }
 
   private isUniqueConstraintError(error: unknown): boolean {

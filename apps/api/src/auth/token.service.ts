@@ -1,7 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+
+export type RefreshTokenPayload = {
+  sub: string;
+  sid: string;
+  type: 'refresh';
+  jti: string;
+  iat?: number;
+  exp?: number;
+};
 
 export type IssuedTokenPair = {
   sessionId: string;
@@ -36,9 +45,8 @@ export class TokenService {
   async issueTokenPair(
     userId: string,
     email: string,
+    sessionId: string = randomUUID(),
   ): Promise<IssuedTokenPair> {
-    const sessionId = randomUUID();
-
     const accessPayload = {
       sub: userId,
       sid: sessionId,
@@ -72,7 +80,39 @@ export class TokenService {
     };
   }
 
+  async verifyRefreshToken(refreshToken: string): Promise<RefreshTokenPayload> {
+    const payload = await this.jwtService.verifyAsync<RefreshTokenPayload>(
+      refreshToken,
+      {
+        secret: this.refreshSecret,
+      },
+    );
+
+    if (
+      payload.type !== 'refresh' ||
+      typeof payload.sub !== 'string' ||
+      typeof payload.sid !== 'string' ||
+      typeof payload.jti !== 'string'
+    ) {
+      throw new Error('Invalid refresh token payload');
+    }
+
+    return payload;
+  }
+
   hashRefreshToken(refreshToken: string): string {
     return createHash('sha256').update(refreshToken).digest('hex');
+  }
+
+  refreshTokenMatches(refreshToken: string, expectedHash: string): boolean {
+    const actualHash = this.hashRefreshToken(refreshToken);
+
+    const actualBuffer = Buffer.from(actualHash, 'utf8');
+    const expectedBuffer = Buffer.from(expectedHash, 'utf8');
+
+    return (
+      actualBuffer.length === expectedBuffer.length &&
+      timingSafeEqual(actualBuffer, expectedBuffer)
+    );
   }
 }

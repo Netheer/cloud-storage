@@ -4,7 +4,9 @@ import {
   HttpCode,
   HttpStatus,
   Post,
+  Req,
   Res,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -22,6 +24,10 @@ import { AuthService } from './auth.service';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+
+type RequestWithCookies = {
+  cookies?: Record<string, unknown>;
+};
 
 @ApiTags('Authentication')
 @Controller('auth')
@@ -70,10 +76,50 @@ export class AuthController {
   ): Promise<AuthResponseDto> {
     const result = await this.authService.login(dto);
 
-    const cookieName = this.configService.getOrThrow<string>(
-      'AUTH_REFRESH_COOKIE_NAME',
-    );
+    this.setRefreshCookie(response, result.refreshToken);
 
+    return this.toAuthResponse(result);
+  }
+
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Rotate refresh token and issue a new access token',
+  })
+  @ApiOkResponse({
+    description: 'Tokens successfully refreshed',
+    type: AuthResponseDto,
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Invalid or expired refresh token',
+  })
+  async refresh(
+    @Req() request: RequestWithCookies,
+    @Res({ passthrough: true }) response: ExpressResponse,
+  ): Promise<AuthResponseDto> {
+    const refreshToken = this.getRefreshToken(request);
+    const result = await this.authService.refresh(refreshToken);
+
+    this.setRefreshCookie(response, result.refreshToken);
+
+    return this.toAuthResponse(result);
+  }
+
+  private getRefreshToken(request: RequestWithCookies): string {
+    const cookieName = this.getRefreshCookieName();
+    const refreshToken = request.cookies?.[cookieName];
+
+    if (typeof refreshToken !== 'string' || refreshToken.length === 0) {
+      throw new UnauthorizedException('Refresh token cookie is missing');
+    }
+
+    return refreshToken;
+  }
+
+  private setRefreshCookie(
+    response: ExpressResponse,
+    refreshToken: string,
+  ): void {
     const secureCookie =
       this.configService.getOrThrow<string>('AUTH_COOKIE_SECURE') === 'true';
 
@@ -81,14 +127,24 @@ export class AuthController {
       this.configService.getOrThrow<string>('JWT_REFRESH_TTL_SECONDS'),
     );
 
-    response.cookie(cookieName, result.refreshToken, {
+    response.cookie(this.getRefreshCookieName(), refreshToken, {
       httpOnly: true,
       secure: secureCookie,
       sameSite: 'lax',
       path: '/auth',
       maxAge: refreshTtlSeconds * 1000,
     });
+  }
 
+  private getRefreshCookieName(): string {
+    return this.configService.getOrThrow<string>('AUTH_REFRESH_COOKIE_NAME');
+  }
+
+  private toAuthResponse(result: {
+    accessToken: string;
+    expiresIn: number;
+    user: UserResponseDto;
+  }): AuthResponseDto {
     return {
       accessToken: result.accessToken,
       expiresIn: result.expiresIn,
