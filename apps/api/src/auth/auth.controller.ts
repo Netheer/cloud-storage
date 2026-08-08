@@ -17,6 +17,7 @@ import {
   ApiOperation,
   ApiTags,
   ApiUnauthorizedResponse,
+  ApiNoContentResponse,
 } from '@nestjs/swagger';
 import type { Response as ExpressResponse } from 'express';
 import { UserResponseDto } from '../users/dto/user-response.dto';
@@ -105,15 +106,43 @@ export class AuthController {
     return this.toAuthResponse(result);
   }
 
-  private getRefreshToken(request: RequestWithCookies): string {
-    const cookieName = this.getRefreshCookieName();
-    const refreshToken = request.cookies?.[cookieName];
+  @Post('logout')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Log out and revoke the current session',
+  })
+  @ApiNoContentResponse({
+    description: 'Session revoked and refresh cookie removed',
+  })
+  async logout(
+    @Req() request: RequestWithCookies,
+    @Res({ passthrough: true }) response: ExpressResponse,
+  ): Promise<void> {
+    const refreshToken = this.getOptionalRefreshToken(request);
 
-    if (typeof refreshToken !== 'string' || refreshToken.length === 0) {
+    await this.authService.logout(refreshToken);
+
+    this.clearRefreshCookie(response);
+  }
+
+  private getRefreshToken(request: RequestWithCookies): string {
+    const refreshToken = this.getOptionalRefreshToken(request);
+
+    if (!refreshToken) {
       throw new UnauthorizedException('Refresh token cookie is missing');
     }
 
     return refreshToken;
+  }
+
+  private getOptionalRefreshToken(
+    request: RequestWithCookies,
+  ): string | undefined {
+    const refreshToken = request.cookies?.[this.getRefreshCookieName()];
+
+    return typeof refreshToken === 'string' && refreshToken.length > 0
+      ? refreshToken
+      : undefined;
   }
 
   private setRefreshCookie(
@@ -133,6 +162,18 @@ export class AuthController {
       sameSite: 'lax',
       path: '/auth',
       maxAge: refreshTtlSeconds * 1000,
+    });
+  }
+
+  private clearRefreshCookie(response: ExpressResponse): void {
+    const secureCookie =
+      this.configService.getOrThrow<string>('AUTH_COOKIE_SECURE') === 'true';
+
+    response.clearCookie(this.getRefreshCookieName(), {
+      httpOnly: true,
+      secure: secureCookie,
+      sameSite: 'lax',
+      path: '/auth',
     });
   }
 

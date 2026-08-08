@@ -145,6 +145,22 @@ export class AuthService {
     };
   }
 
+  async logout(refreshToken: string | undefined): Promise<void> {
+    if (!refreshToken) {
+      return;
+    }
+
+    let payload: RefreshTokenPayload;
+
+    try {
+      payload = await this.tokenService.verifyRefreshToken(refreshToken);
+    } catch {
+      return;
+    }
+
+    await this.authSessionsService.revoke(payload.sid);
+  }
+
   private async parseRefreshToken(
     refreshToken: string,
   ): Promise<RefreshTokenPayload> {
