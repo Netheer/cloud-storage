@@ -4,11 +4,14 @@ import { useAuth } from '../auth/useAuth';
 import { listFolders, type Folder } from './folders-api';
 
 interface MoveFolderDialogProps {
-  folder: Folder;
+  itemName: string;
+  itemType: 'folder' | 'file';
+  currentFolderId: string | null;
+  excludedFolderId?: string;
   isSubmitting: boolean;
   error: string | null;
   onClose: () => void;
-  onMove: (parentId: string | null) => Promise<void>;
+  onMove: (folderId: string | null) => Promise<void>;
 }
 
 interface DestinationBreadcrumb {
@@ -17,7 +20,10 @@ interface DestinationBreadcrumb {
 }
 
 export function MoveFolderDialog({
-  folder,
+  itemName,
+  itemType,
+  currentFolderId,
+  excludedFolderId,
   isSubmitting,
   error,
   onClose,
@@ -38,7 +44,7 @@ export function MoveFolderDialog({
     breadcrumbs[breadcrumbs.length - 1] ?? null;
   const destinationId = currentFolder?.id ?? null;
   const isCurrentLocation =
-    destinationId === folder.parentId;
+    destinationId === currentFolderId;
 
   useEffect(() => {
     let active = true;
@@ -50,10 +56,13 @@ export function MoveFolderDialog({
       .then((loadedFolders) => {
         if (active) {
           setFolders(
-            loadedFolders.filter(
-              (candidate) => candidate.id !== folder.id,
-            ),
-          );
+  excludedFolderId
+    ? loadedFolders.filter(
+        (candidate) =>
+          candidate.id !== excludedFolderId,
+      )
+    : loadedFolders,
+);
         }
       })
       .catch((requestError: unknown) => {
@@ -79,7 +88,7 @@ export function MoveFolderDialog({
   }, [
     authFetch,
     destinationId,
-    folder.id,
+    excludedFolderId,
     reloadVersion,
   ]);
 
@@ -138,12 +147,15 @@ export function MoveFolderDialog({
         <header className="move-dialog__header">
           <div>
             <h2 id="move-dialog-title">
-              Переместить папку
-            </h2>
-            <p>
-              Выберите новое расположение для
-              <strong> «{folder.name}»</strong>.
-            </p>
+  {itemType === 'file'
+    ? 'Переместить файл'
+    : 'Переместить папку'}
+</h2>
+
+<p>
+  Выберите новое расположение для
+  <strong> «{itemName}»</strong>.
+</p>
           </div>
 
           <button

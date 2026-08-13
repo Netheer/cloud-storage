@@ -17,6 +17,7 @@ import type { RenameFileDto } from './dto/rename-file.dto';
 import type { DownloadFileResponseDto } from './dto/download-file-response.dto';
 import type { FileResponseDto } from './dto/file-response.dto';
 import type { UploadFileDto } from './dto/upload-file.dto';
+import type { MoveFileDto } from './dto/move-file.dto';
 
 const FILE_SELECT = {
   id: true,
@@ -250,6 +251,44 @@ export class FilesService {
     });
 
     return this.toResponseDto(updatedFile);
+  }
+
+  async move(
+    ownerId: string,
+    fileId: string,
+    dto: MoveFileDto,
+  ): Promise<FileResponseDto> {
+    const file = await this.prisma.file.findFirst({
+      where: {
+        id: fileId,
+        ownerId,
+        status: 'READY',
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!file) {
+      throw new NotFoundException('File not found');
+    }
+
+    if (dto.folderId !== null) {
+      await this.ensureOwnedFolderExists(ownerId, dto.folderId);
+    }
+
+    const movedFile = await this.prisma.file.update({
+      where: {
+        id: file.id,
+      },
+      data: {
+        folderId: dto.folderId,
+      },
+      select: FILE_SELECT,
+    });
+
+    return this.toResponseDto(movedFile);
   }
 
   async remove(ownerId: string, fileId: string): Promise<void> {

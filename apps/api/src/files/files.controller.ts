@@ -39,6 +39,7 @@ import { UploadFileDto } from './dto/upload-file.dto';
 import { FilesService } from './files.service';
 import { DownloadFileResponseDto } from './dto/download-file-response.dto';
 import { RenameFileDto } from './dto/rename-file.dto';
+import { MoveFileDto } from './dto/move-file.dto';
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 
@@ -155,6 +156,36 @@ export class FilesController {
     @Param('id', ParseUUIDPipe) fileId: string,
   ): Promise<DownloadFileResponseDto> {
     return this.filesService.createDownloadUrl(user.id, fileId);
+  }
+
+  @Patch(':id/move')
+  @ApiOperation({
+    summary: 'Move a file to another folder or to root',
+  })
+  @ApiParam({
+    name: 'id',
+    format: 'uuid',
+    description: 'File ID',
+  })
+  @ApiOkResponse({
+    description: 'File moved successfully',
+    type: FileResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid file ID or destination folder ID',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Access token is missing or invalid',
+  })
+  @ApiNotFoundResponse({
+    description: 'File or destination folder not found',
+  })
+  move(
+    @CurrentUser() user: UserResponseDto,
+    @Param('id', ParseUUIDPipe) fileId: string,
+    @Body() dto: MoveFileDto,
+  ): Promise<FileResponseDto> {
+    return this.filesService.move(user.id, fileId, dto);
   }
 
   @Patch(':id')

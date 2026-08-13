@@ -298,6 +298,7 @@ button {
     border-color 150ms ease,
     box-shadow 150ms ease,
     transform 150ms ease;
+  z-index: 0;
 }
 
 .folder-card:hover {
@@ -336,6 +337,11 @@ button {
 .folder-card__arrow {
   color: #a9b2c1;
   font-size: 25px;
+}
+
+.folder-card--menu-open,
+.file-card--menu-open {
+  z-index: 30;
 }
 
 .workspace-error {
@@ -1027,6 +1033,109 @@ button {
   }
 
   .move-dialog__actions button {
+    width: 100%;
+  }
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.workspace-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.workspace-header__actions .secondary-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+  }
+
+.content-heading--files {
+  margin-top: 30px;
+}
+
+.file-grid {
+  display: grid;
+  grid-template-columns: repeat(
+    auto-fill,
+    minmax(min(260px, 100%), 1fr)
+  );
+  gap: 14px;
+}
+
+.file-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid #e2e7ef;
+  border-radius: 14px;
+  color: #172033;
+  background: #fff;
+  box-shadow: 0 4px 16px rgb(28 39 60 / 4%);
+  position: relative;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: 0 12px 0 18px;
+  overflow: visible;
+  min-height: 86px;
+}
+
+.file-card .folder-card__actions {
+  padding-right: 0;
+}
+
+.file-card .folder-card__menu {
+  right: 0;
+}
+
+.file-card__icon {
+  display: flex;
+  color: #7890e8;
+}
+
+.file-card__content {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.file-card__content strong,
+.file-card__content span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-card__content strong {
+  font-size: 14px;
+}
+
+.file-card__content span {
+  color: #929bad;
+  font-size: 12px;
+}
+
+@media (max-width: 600px) {
+  .workspace-header__actions {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .workspace-header__actions button {
     width: 100%;
   }
 }

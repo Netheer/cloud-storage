@@ -481,6 +481,111 @@ describe('Files (e2e)', () => {
       .expect(400);
   });
 
+  it('moves a file between folders and root with owner isolation', async () => {
+    const ownerFolderId = await createFolder(
+      owner.accessToken,
+      'File Move Destination',
+    );
+
+    const foreignFolderId = await createFolder(
+      otherUser.accessToken,
+      'Foreign File Destination',
+    );
+
+    const file = await uploadFile(
+      owner.accessToken,
+      'move-me.txt',
+      Buffer.from('Move content'),
+    );
+
+    putObjectMock.mockClear();
+
+    const moveResponse = await request(app.getHttpServer())
+      .patch(`/files/${file.id}/move`)
+      .set(authorization(owner.accessToken))
+      .send({
+        folderId: ownerFolderId,
+      })
+      .expect(200);
+
+    expect(moveResponse.body).toMatchObject({
+      id: file.id,
+      name: 'move-me.txt',
+      folderId: ownerFolderId,
+    });
+
+    expect(putObjectMock).not.toHaveBeenCalled();
+    expect(deleteObjectMock).not.toHaveBeenCalled();
+
+    const rootList = await request(app.getHttpServer())
+      .get('/files')
+      .set(authorization(owner.accessToken))
+      .expect(200);
+
+    const rootFiles = rootList.body as FileBody[];
+
+    expect(rootFiles.some((listedFile) => listedFile.id === file.id)).toBe(
+      false,
+    );
+
+    const folderList = await request(app.getHttpServer())
+      .get('/files')
+      .query({
+        folderId: ownerFolderId,
+      })
+      .set(authorization(owner.accessToken))
+      .expect(200);
+
+    const folderFiles = folderList.body as FileBody[];
+
+    expect(folderFiles.some((listedFile) => listedFile.id === file.id)).toBe(
+      true,
+    );
+
+    await request(app.getHttpServer())
+      .patch(`/files/${file.id}/move`)
+      .set(authorization(otherUser.accessToken))
+      .send({
+        folderId: null,
+      })
+      .expect(404);
+
+    await request(app.getHttpServer())
+      .patch(`/files/${file.id}/move`)
+      .set(authorization(owner.accessToken))
+      .send({
+        folderId: foreignFolderId,
+      })
+      .expect(404);
+
+    await request(app.getHttpServer())
+      .patch(`/files/${file.id}/move`)
+      .set(authorization(owner.accessToken))
+      .send({
+        folderId: 'not-a-uuid',
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .patch(`/files/${file.id}/move`)
+      .set(authorization(owner.accessToken))
+      .send({})
+      .expect(400);
+
+    const moveToRootResponse = await request(app.getHttpServer())
+      .patch(`/files/${file.id}/move`)
+      .set(authorization(owner.accessToken))
+      .send({
+        folderId: null,
+      })
+      .expect(200);
+
+    expect(moveToRootResponse.body).toMatchObject({
+      id: file.id,
+      folderId: null,
+    });
+  });
+
   it('deletes the file and its stored object', async () => {
     const file = await uploadFile(
       owner.accessToken,

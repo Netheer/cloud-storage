@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 
 interface DeleteFolderDialogProps {
-  folderName: string;
+  itemName: string;
+  itemType?: 'folder' | 'file';
   isSubmitting: boolean;
   error: string | null;
   onClose: () => void;
@@ -9,12 +10,14 @@ interface DeleteFolderDialogProps {
 }
 
 export function DeleteFolderDialog({
-  folderName,
+  itemName,
+  itemType = 'folder',
   isSubmitting,
   error,
   onClose,
   onConfirm,
 }: DeleteFolderDialogProps) {
+  const isFile = itemType === 'file';
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !isSubmitting) {
@@ -51,12 +54,23 @@ export function DeleteFolderDialog({
           !
         </div>
 
-        <h2 id="delete-dialog-title">Удалить папку?</h2>
+        <h2 id="delete-dialog-title">
+  {isFile ? 'Удалить файл?' : 'Удалить папку?'}
+</h2>
 
-        <p>
-          Папка <strong>«{folderName}»</strong> будет удалена.
-          Удалить можно только пустую папку.
-        </p>
+<p>
+  {isFile ? (
+    <>
+      Файл <strong>«{itemName}»</strong> будет безвозвратно
+      удалён из хранилища.
+    </>
+  ) : (
+    <>
+      Папка <strong>«{itemName}»</strong> будет удалена.
+      Удалить можно только пустую папку.
+    </>
+  )}
+</p>
 
         {error && (
           <div className="delete-dialog__error" role="alert">

@@ -7,6 +7,7 @@ import type { FormEvent } from 'react';
 interface FolderNameDialogProps {
   title: string;
   initialName?: string;
+  entityLabel?: string;
   submitLabel: string;
   isSubmitting: boolean;
   error: string | null;
@@ -16,6 +17,7 @@ interface FolderNameDialogProps {
 
 export function FolderNameDialog({
   title,
+  entityLabel = 'Папка',
   initialName = '',
   submitLabel,
   isSubmitting,
@@ -72,7 +74,7 @@ export function FolderNameDialog({
       >
         <div className="dialog__header">
           <div>
-            <p>Папка</p>
+            <p>{entityLabel}</p>
             <h2 id="folder-dialog-title">{title}</h2>
           </div>
 
