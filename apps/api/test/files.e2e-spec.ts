@@ -1843,4 +1843,221 @@ describe('Files (e2e)', () => {
 
     expect(abortMultipartUploadMock).not.toHaveBeenCalled();
   });
+
+  it('rejects multipart parts with incorrect sizes', async () => {
+    const initiationResponse = await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'wrong-part-sizes.bin',
+        totalSize: (11 * 1024 * 1024).toString(),
+      })
+      .expect(201);
+
+    const initiationBody = initiationResponse.body as {
+      id?: unknown;
+    };
+
+    if (typeof initiationBody.id !== 'string') {
+      throw new Error('Multipart upload session ID is missing');
+    }
+
+    listMultipartUploadPartsMock.mockResolvedValue([
+      {
+        partNumber: 1,
+        etag: '"wrong-size-etag-1"',
+        size: 7 * 1024 * 1024,
+      },
+      {
+        partNumber: 2,
+        etag: '"wrong-size-etag-2"',
+        size: 4 * 1024 * 1024,
+      },
+    ]);
+
+    await request(app.getHttpServer())
+      .post(`/files/multipart/${initiationBody.id}/complete`)
+      .set(authorization(owner.accessToken))
+      .expect(409);
+
+    const session = await prisma.uploadSession.findUnique({
+      where: {
+        id: initiationBody.id,
+      },
+      select: {
+        status: true,
+        fileId: true,
+      },
+    });
+
+    expect(session).toEqual({
+      status: 'UPLOADING',
+      fileId: null,
+    });
+
+    expect(completeMultipartUploadMock).not.toHaveBeenCalled();
+  });
+
+  it('does not complete an expired multipart session', async () => {
+    const initiationResponse = await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'expired-completion.bin',
+        totalSize: (11 * 1024 * 1024).toString(),
+      })
+      .expect(201);
+
+    const initiationBody = initiationResponse.body as {
+      id?: unknown;
+    };
+
+    if (typeof initiationBody.id !== 'string') {
+      throw new Error('Multipart upload session ID is missing');
+    }
+
+    await prisma.uploadSession.update({
+      where: {
+        id: initiationBody.id,
+      },
+      data: {
+        expiresAt: new Date(Date.now() - 1000),
+      },
+    });
+
+    await request(app.getHttpServer())
+      .post(`/files/multipart/${initiationBody.id}/complete`)
+      .set(authorization(owner.accessToken))
+      .expect(410);
+
+    const expiredSession = await prisma.uploadSession.findUnique({
+      where: {
+        id: initiationBody.id,
+      },
+      select: {
+        status: true,
+        fileId: true,
+      },
+    });
+
+    expect(expiredSession).toEqual({
+      status: 'EXPIRED',
+      fileId: null,
+    });
+
+    expect(getObjectMetadataMock).not.toHaveBeenCalled();
+    expect(listMultipartUploadPartsMock).not.toHaveBeenCalled();
+    expect(completeMultipartUploadMock).not.toHaveBeenCalled();
+  });
+
+  it('recovers after an ambiguous multipart completion failure', async () => {
+    const totalSize = 11 * 1024 * 1024;
+
+    const initiationResponse = await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'ambiguous-completion.bin',
+        mimeType: 'application/octet-stream',
+        totalSize: totalSize.toString(),
+      })
+      .expect(201);
+
+    const initiationBody = initiationResponse.body as {
+      id?: unknown;
+    };
+
+    if (typeof initiationBody.id !== 'string') {
+      throw new Error('Multipart upload session ID is missing');
+    }
+
+    listMultipartUploadPartsMock.mockResolvedValue([
+      {
+        partNumber: 1,
+        etag: '"ambiguous-etag-1"',
+        size: 8 * 1024 * 1024,
+      },
+      {
+        partNumber: 2,
+        etag: '"ambiguous-etag-2"',
+        size: 3 * 1024 * 1024,
+      },
+    ]);
+
+    getObjectMetadataMock.mockResolvedValueOnce(null);
+
+    completeMultipartUploadMock.mockRejectedValueOnce(
+      new Error('Completion result is unknown'),
+    );
+
+    await request(app.getHttpServer())
+      .post(`/files/multipart/${initiationBody.id}/complete`)
+      .set(authorization(owner.accessToken))
+      .expect(503);
+
+    const completingSession = await prisma.uploadSession.findUnique({
+      where: {
+        id: initiationBody.id,
+      },
+      select: {
+        status: true,
+      },
+    });
+
+    expect(completingSession?.status).toBe('COMPLETING');
+
+    await request(app.getHttpServer())
+      .post(`/files/multipart/${initiationBody.id}/complete`)
+      .set(authorization(owner.accessToken))
+      .expect(409);
+
+    await prisma.uploadSession.update({
+      where: {
+        id: initiationBody.id,
+      },
+      data: {
+        updatedAt: new Date(Date.now() - 60_000),
+      },
+    });
+
+    getObjectMetadataMock.mockResolvedValueOnce({
+      size: totalSize,
+      contentType: 'application/octet-stream',
+      etag: '"ambiguous-completed-object"',
+    });
+
+    const recoveredResponse = await request(app.getHttpServer())
+      .post(`/files/multipart/${initiationBody.id}/complete`)
+      .set(authorization(owner.accessToken))
+      .expect(200);
+
+    const recoveredFile = recoveredResponse.body as FileBody;
+
+    expect(recoveredFile).toMatchObject({
+      name: 'ambiguous-completion.bin',
+      ownerId: owner.id,
+      status: 'READY',
+      size: totalSize.toString(),
+    });
+
+    expect(completeMultipartUploadMock).toHaveBeenCalledTimes(1);
+
+    const recoveredSession = await prisma.uploadSession.findUnique({
+      where: {
+        id: initiationBody.id,
+      },
+      select: {
+        status: true,
+        fileId: true,
+      },
+    });
+
+    expect(recoveredSession).toEqual({
+      status: 'COMPLETED',
+      fileId: recoveredFile.id,
+    });
+  });
 });
