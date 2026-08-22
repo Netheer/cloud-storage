@@ -45,11 +45,31 @@ describe('Files (e2e)', () => {
   const createPresignedDownloadUrlMock =
     jest.fn<ObjectStorage['createPresignedDownloadUrl']>();
 
+  const createMultipartUploadMock =
+    jest.fn<ObjectStorage['createMultipartUpload']>();
+
+  const createPresignedUploadPartUrlMock =
+    jest.fn<ObjectStorage['createPresignedUploadPartUrl']>();
+
+  const listMultipartUploadPartsMock =
+    jest.fn<ObjectStorage['listMultipartUploadParts']>();
+
+  const completeMultipartUploadMock =
+    jest.fn<ObjectStorage['completeMultipartUpload']>();
+
+  const abortMultipartUploadMock =
+    jest.fn<ObjectStorage['abortMultipartUpload']>();
+
   const objectStorageMock: ObjectStorage = {
     checkHealth: checkHealthMock,
     putObject: putObjectMock,
     deleteObject: deleteObjectMock,
     createPresignedDownloadUrl: createPresignedDownloadUrlMock,
+    createMultipartUpload: createMultipartUploadMock,
+    createPresignedUploadPartUrl: createPresignedUploadPartUrlMock,
+    listMultipartUploadParts: listMultipartUploadPartsMock,
+    completeMultipartUpload: completeMultipartUploadMock,
+    abortMultipartUpload: abortMultipartUploadMock,
   };
 
   beforeAll(async () => {
@@ -93,6 +113,24 @@ describe('Files (e2e)', () => {
     createPresignedDownloadUrlMock.mockResolvedValue(
       'https://storage.test/download',
     );
+    createMultipartUploadMock.mockReset();
+    createMultipartUploadMock.mockResolvedValue({
+      uploadId: 'test-multipart-upload-id',
+    });
+
+    createPresignedUploadPartUrlMock.mockReset();
+    createPresignedUploadPartUrlMock.mockResolvedValue(
+      'https://storage.test/upload-part',
+    );
+
+    listMultipartUploadPartsMock.mockReset();
+    listMultipartUploadPartsMock.mockResolvedValue([]);
+
+    completeMultipartUploadMock.mockReset();
+    completeMultipartUploadMock.mockResolvedValue(undefined);
+
+    abortMultipartUploadMock.mockReset();
+    abortMultipartUploadMock.mockResolvedValue(undefined);
   });
 
   afterAll(async () => {
@@ -689,5 +727,252 @@ describe('Files (e2e)', () => {
       .expect(204);
 
     expect(deleteObjectMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('initiates a multipart upload idempotently', async () => {
+    const folderId = await createFolder(
+      owner.accessToken,
+      'Multipart Upload Folder',
+    );
+
+    const clientRequestId = randomUUID();
+    const totalSize = (11 * 1024 * 1024).toString();
+
+    const requestBody = {
+      clientRequestId,
+      fileName: 'large-file.bin',
+      mimeType: 'application/octet-stream',
+      totalSize,
+      folderId,
+    };
+
+    const firstResponse = await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send(requestBody)
+      .expect(201);
+
+    const firstBody = firstResponse.body as {
+      id?: unknown;
+      clientRequestId?: unknown;
+      originalName?: unknown;
+      mimeType?: unknown;
+      folderId?: unknown;
+      totalSize?: unknown;
+      partSize?: unknown;
+      totalParts?: unknown;
+      status?: unknown;
+      fileId?: unknown;
+    };
+
+    expect(firstBody).toMatchObject({
+      clientRequestId,
+      originalName: 'large-file.bin',
+      mimeType: 'application/octet-stream',
+      folderId,
+      totalSize,
+      partSize: (8 * 1024 * 1024).toString(),
+      totalParts: 2,
+      status: 'UPLOADING',
+      fileId: null,
+    });
+
+    expect(typeof firstBody.id).toBe('string');
+
+    expect(createMultipartUploadMock).toHaveBeenCalledTimes(1);
+
+    const storedSession = await prisma.uploadSession.findUnique({
+      where: {
+        ownerId_clientRequestId: {
+          ownerId: owner.id,
+          clientRequestId,
+        },
+      },
+    });
+
+    if (!storedSession) {
+      throw new Error('Multipart upload session is missing');
+    }
+
+    expect(storedSession.objectKey).toMatch(
+      new RegExp(`^users/${owner.id}/objects/`),
+    );
+
+    expect(createMultipartUploadMock).toHaveBeenCalledWith({
+      objectKey: storedSession.objectKey,
+      contentType: 'application/octet-stream',
+    });
+
+    expect(storedSession).toMatchObject({
+      ownerId: owner.id,
+      folderId,
+      clientRequestId,
+      originalName: 'large-file.bin',
+      mimeType: 'application/octet-stream',
+      totalSize: BigInt(totalSize),
+      partSize: BigInt(8 * 1024 * 1024),
+      totalParts: 2,
+      multipartUploadId: 'test-multipart-upload-id',
+      status: 'UPLOADING',
+    });
+
+    const repeatedResponse = await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send(requestBody)
+      .expect(201);
+
+    expect(repeatedResponse.body).toMatchObject({
+      id: firstBody.id,
+      clientRequestId,
+      status: 'UPLOADING',
+    });
+
+    expect(createMultipartUploadMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('validates multipart upload parameters and folder ownership', async () => {
+    const clientRequestId = randomUUID();
+    const totalSize = (11 * 1024 * 1024).toString();
+
+    await request(app.getHttpServer())
+      .post('/files/multipart')
+      .send({
+        clientRequestId,
+        fileName: 'unauthorized.bin',
+        totalSize,
+      })
+      .expect(401);
+
+    await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: 'not-a-uuid',
+        fileName: 'invalid-request-id.bin',
+        totalSize,
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'invalid-size.bin',
+        totalSize: 123,
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'small-file.bin',
+        totalSize: (10 * 1024 * 1024).toString(),
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'too-large.bin',
+        totalSize: (5 * 1024 * 1024 * 1024 + 1).toString(),
+      })
+      .expect(400);
+
+    const foreignFolderId = await createFolder(
+      otherUser.accessToken,
+      'Foreign Multipart Folder',
+    );
+
+    await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'foreign-folder.bin',
+        totalSize,
+        folderId: foreignFolderId,
+      })
+      .expect(404);
+
+    const conflictRequestId = randomUUID();
+
+    await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: conflictRequestId,
+        fileName: 'original-name.bin',
+        totalSize,
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: conflictRequestId,
+        fileName: 'different-name.bin',
+        totalSize,
+      })
+      .expect(409);
+  });
+
+  it('marks the multipart session as failed when storage is unavailable', async () => {
+    const clientRequestId = randomUUID();
+    const requestBody = {
+      clientRequestId,
+      fileName: 'storage-failure.bin',
+      mimeType: 'application/octet-stream',
+      totalSize: (11 * 1024 * 1024).toString(),
+      folderId: null,
+    };
+
+    createMultipartUploadMock.mockRejectedValueOnce(
+      new Error('Storage is unavailable'),
+    );
+
+    await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send(requestBody)
+      .expect(503);
+
+    const failedSession = await prisma.uploadSession.findUnique({
+      where: {
+        ownerId_clientRequestId: {
+          ownerId: owner.id,
+          clientRequestId,
+        },
+      },
+    });
+
+    expect(failedSession).toMatchObject({
+      ownerId: owner.id,
+      multipartUploadId: null,
+      status: 'FAILED',
+    });
+
+    expect(createMultipartUploadMock).toHaveBeenCalledTimes(1);
+    expect(abortMultipartUploadMock).not.toHaveBeenCalled();
+
+    const repeatedResponse = await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send(requestBody)
+      .expect(201);
+
+    expect(repeatedResponse.body).toMatchObject({
+      id: failedSession?.id,
+      clientRequestId,
+      status: 'FAILED',
+    });
+
+    expect(createMultipartUploadMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -29,6 +29,8 @@ import {
   ApiUnauthorizedResponse,
   ApiParam,
   ApiNoContentResponse,
+  ApiConflictResponse,
+  ApiServiceUnavailableResponse,
 } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -40,6 +42,8 @@ import { FilesService } from './files.service';
 import { DownloadFileResponseDto } from './dto/download-file-response.dto';
 import { RenameFileDto } from './dto/rename-file.dto';
 import { MoveFileDto } from './dto/move-file.dto';
+import { InitiateMultipartUploadDto } from './dto/initiate-multipart-upload.dto';
+import { MultipartUploadSessionResponseDto } from './dto/multipart-upload-session-response.dto';
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 
@@ -102,6 +106,36 @@ export class FilesController {
     }
 
     return this.filesService.upload(user.id, file, dto);
+  }
+
+  @Post('multipart')
+  @ApiOperation({
+    summary: 'Initiate a resumable multipart upload',
+  })
+  @ApiCreatedResponse({
+    description: 'Multipart upload session created or returned',
+    type: MultipartUploadSessionResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'Upload parameters are invalid',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Access token is missing or invalid',
+  })
+  @ApiNotFoundResponse({
+    description: 'Destination folder not found',
+  })
+  @ApiConflictResponse({
+    description: 'Client request ID is already used with different parameters',
+  })
+  @ApiServiceUnavailableResponse({
+    description: 'Object storage is temporarily unavailable',
+  })
+  initiateMultipartUpload(
+    @CurrentUser() user: UserResponseDto,
+    @Body() dto: InitiateMultipartUploadDto,
+  ): Promise<MultipartUploadSessionResponseDto> {
+    return this.filesService.initiateMultipartUpload(user.id, dto);
   }
 
   @Get()
