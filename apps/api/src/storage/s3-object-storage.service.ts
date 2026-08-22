@@ -250,13 +250,24 @@ export class S3ObjectStorageService implements ObjectStorage, OnModuleDestroy {
   }
 
   async abortMultipartUpload(input: AbortMultipartUploadInput): Promise<void> {
-    await this.client.send(
-      new AbortMultipartUploadCommand({
-        Bucket: this.bucket,
-        Key: input.objectKey,
-        UploadId: input.uploadId,
-      }),
-    );
+    try {
+      await this.client.send(
+        new AbortMultipartUploadCommand({
+          Bucket: this.bucket,
+          Key: input.objectKey,
+          UploadId: input.uploadId,
+        }),
+      );
+    } catch (error: unknown) {
+      if (
+        error instanceof S3ServiceException &&
+        error.$metadata.httpStatusCode === 404
+      ) {
+        return;
+      }
+
+      throw error;
+    }
   }
 
   onModuleDestroy(): void {

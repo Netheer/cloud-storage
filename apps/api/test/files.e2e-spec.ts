@@ -1648,4 +1648,199 @@ describe('Files (e2e)', () => {
       fileId: recoveredFile.id,
     });
   });
+
+  it('aborts a multipart upload idempotently', async () => {
+    const initiationResponse = await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'abort-multipart.bin',
+        totalSize: (11 * 1024 * 1024).toString(),
+      })
+      .expect(201);
+
+    const initiationBody = initiationResponse.body as {
+      id?: unknown;
+    };
+
+    if (typeof initiationBody.id !== 'string') {
+      throw new Error('Multipart upload session ID is missing');
+    }
+
+    const sessionBeforeAbort = await prisma.uploadSession.findUnique({
+      where: {
+        id: initiationBody.id,
+      },
+    });
+
+    if (!sessionBeforeAbort?.multipartUploadId) {
+      throw new Error('Multipart upload metadata is missing');
+    }
+
+    await request(app.getHttpServer())
+      .delete(`/files/multipart/${initiationBody.id}`)
+      .set(authorization(owner.accessToken))
+      .expect(204);
+
+    expect(abortMultipartUploadMock).toHaveBeenCalledWith({
+      objectKey: sessionBeforeAbort.objectKey,
+      uploadId: sessionBeforeAbort.multipartUploadId,
+    });
+
+    const abortedSession = await prisma.uploadSession.findUnique({
+      where: {
+        id: initiationBody.id,
+      },
+      select: {
+        status: true,
+        fileId: true,
+      },
+    });
+
+    expect(abortedSession).toEqual({
+      status: 'ABORTED',
+      fileId: null,
+    });
+
+    await request(app.getHttpServer())
+      .delete(`/files/multipart/${initiationBody.id}`)
+      .set(authorization(owner.accessToken))
+      .expect(204);
+
+    expect(abortMultipartUploadMock).toHaveBeenCalledTimes(1);
+
+    await request(app.getHttpServer())
+      .delete(`/files/multipart/${initiationBody.id}`)
+      .set(authorization(otherUser.accessToken))
+      .expect(404);
+
+    await request(app.getHttpServer())
+      .delete('/files/multipart/not-a-uuid')
+      .set(authorization(owner.accessToken))
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .delete(`/files/multipart/${initiationBody.id}`)
+      .expect(401);
+
+    expect(
+      await prisma.file.count({
+        where: {
+          uploads: {
+            some: {
+              id: initiationBody.id,
+            },
+          },
+        },
+      }),
+    ).toBe(0);
+  });
+
+  it('recovers multipart cancellation after object storage failure', async () => {
+    const initiationResponse = await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'abort-recovery.bin',
+        totalSize: (11 * 1024 * 1024).toString(),
+      })
+      .expect(201);
+
+    const initiationBody = initiationResponse.body as {
+      id?: unknown;
+    };
+
+    if (typeof initiationBody.id !== 'string') {
+      throw new Error('Multipart upload session ID is missing');
+    }
+
+    abortMultipartUploadMock.mockRejectedValueOnce(
+      new Error('Storage is unavailable'),
+    );
+
+    await request(app.getHttpServer())
+      .delete(`/files/multipart/${initiationBody.id}`)
+      .set(authorization(owner.accessToken))
+      .expect(503);
+
+    const abortingSession = await prisma.uploadSession.findUnique({
+      where: {
+        id: initiationBody.id,
+      },
+      select: {
+        status: true,
+      },
+    });
+
+    expect(abortingSession?.status).toBe('ABORTING');
+
+    await request(app.getHttpServer())
+      .delete(`/files/multipart/${initiationBody.id}`)
+      .set(authorization(owner.accessToken))
+      .expect(409);
+
+    await prisma.uploadSession.update({
+      where: {
+        id: initiationBody.id,
+      },
+      data: {
+        updatedAt: new Date(Date.now() - 60_000),
+      },
+    });
+
+    await request(app.getHttpServer())
+      .delete(`/files/multipart/${initiationBody.id}`)
+      .set(authorization(owner.accessToken))
+      .expect(204);
+
+    const recoveredSession = await prisma.uploadSession.findUnique({
+      where: {
+        id: initiationBody.id,
+      },
+      select: {
+        status: true,
+      },
+    });
+
+    expect(recoveredSession?.status).toBe('ABORTED');
+    expect(abortMultipartUploadMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not abort a completed multipart upload', async () => {
+    const initiationResponse = await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'completed-abort-guard.bin',
+        totalSize: (11 * 1024 * 1024).toString(),
+      })
+      .expect(201);
+
+    const initiationBody = initiationResponse.body as {
+      id?: unknown;
+    };
+
+    if (typeof initiationBody.id !== 'string') {
+      throw new Error('Multipart upload session ID is missing');
+    }
+
+    await prisma.uploadSession.update({
+      where: {
+        id: initiationBody.id,
+      },
+      data: {
+        status: 'COMPLETED',
+      },
+    });
+
+    await request(app.getHttpServer())
+      .delete(`/files/multipart/${initiationBody.id}`)
+      .set(authorization(owner.accessToken))
+      .expect(409);
+
+    expect(abortMultipartUploadMock).not.toHaveBeenCalled();
+  });
 });

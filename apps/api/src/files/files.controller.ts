@@ -375,6 +375,41 @@ export class FilesController {
     return this.filesService.rename(user.id, fileId, dto);
   }
 
+  @Delete('multipart/:sessionId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Abort a multipart upload',
+  })
+  @ApiParam({
+    name: 'sessionId',
+    format: 'uuid',
+    description: 'Multipart upload session ID',
+  })
+  @ApiNoContentResponse({
+    description: 'Multipart upload aborted successfully',
+  })
+  @ApiBadRequestResponse({
+    description: 'Session ID is invalid',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Access token is missing or invalid',
+  })
+  @ApiNotFoundResponse({
+    description: 'Multipart upload session not found',
+  })
+  @ApiConflictResponse({
+    description: 'Multipart upload cannot currently be aborted',
+  })
+  @ApiServiceUnavailableResponse({
+    description: 'Object storage is temporarily unavailable',
+  })
+  abortMultipartUpload(
+    @CurrentUser() user: UserResponseDto,
+    @Param('sessionId', ParseUUIDPipe) uploadSessionId: string,
+  ): Promise<void> {
+    return this.filesService.abortMultipartUpload(user.id, uploadSessionId);
+  }
+
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({

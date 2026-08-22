@@ -36,6 +36,7 @@ const MULTIPART_UPLOAD_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_MULTIPART_PARTS = 10_000;
 const MULTIPART_PART_URL_TTL_SECONDS = 15 * 60;
 const MULTIPART_COMPLETION_RECOVERY_DELAY_MS = 30 * 1000;
+const MULTIPART_ABORT_RECOVERY_DELAY_MS = 30 * 1000;
 
 const FILE_SELECT = {
   id: true,
@@ -693,6 +694,142 @@ export class FilesService {
       originalName: session.originalName,
       mimeType: session.mimeType,
       totalSize: session.totalSize,
+    });
+  }
+
+  async abortMultipartUpload(
+    ownerId: string,
+    uploadSessionId: string,
+  ): Promise<void> {
+    const session = await this.prisma.uploadSession.findFirst({
+      where: {
+        id: uploadSessionId,
+        ownerId,
+      },
+      select: {
+        id: true,
+        status: true,
+        objectKey: true,
+        multipartUploadId: true,
+        updatedAt: true,
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Multipart upload session not found');
+    }
+
+    if (session.status === 'ABORTED') {
+      return;
+    }
+
+    if (session.status === 'COMPLETED') {
+      throw new ConflictException(
+        'Completed multipart upload cannot be aborted',
+      );
+    }
+
+    if (session.status === 'COMPLETING') {
+      throw new ConflictException(
+        'Multipart upload completion is already in progress',
+      );
+    }
+
+    if (session.status === 'ABORTING') {
+      if (
+        Date.now() - session.updatedAt.getTime() <
+        MULTIPART_ABORT_RECOVERY_DELAY_MS
+      ) {
+        throw new ConflictException(
+          'Multipart upload cancellation is already in progress',
+        );
+      }
+
+      const recoveredClaim = await this.prisma.uploadSession.updateMany({
+        where: {
+          id: session.id,
+          ownerId,
+          status: 'ABORTING',
+          updatedAt: session.updatedAt,
+        },
+        data: {
+          updatedAt: new Date(),
+        },
+      });
+
+      if (recoveredClaim.count === 0) {
+        throw new ConflictException(
+          'Multipart upload cancellation is already in progress',
+        );
+      }
+    } else {
+      const abortableStatuses = [
+        'CREATED',
+        'UPLOADING',
+        'EXPIRED',
+        'FAILED',
+      ] as const;
+
+      if (!abortableStatuses.includes(session.status)) {
+        throw new ConflictException(
+          'Multipart upload session cannot be aborted',
+        );
+      }
+
+      const claimedSession = await this.prisma.uploadSession.updateMany({
+        where: {
+          id: session.id,
+          ownerId,
+          status: session.status,
+        },
+        data: {
+          status: 'ABORTING',
+        },
+      });
+
+      if (claimedSession.count === 0) {
+        const currentSession = await this.prisma.uploadSession.findFirst({
+          where: {
+            id: session.id,
+            ownerId,
+          },
+          select: {
+            status: true,
+          },
+        });
+
+        if (currentSession?.status === 'ABORTED') {
+          return;
+        }
+
+        throw new ConflictException(
+          'Multipart upload session state has changed',
+        );
+      }
+    }
+
+    if (session.multipartUploadId) {
+      try {
+        await this.objectStorage.abortMultipartUpload({
+          objectKey: session.objectKey,
+          uploadId: session.multipartUploadId,
+        });
+      } catch {
+        throw new ServiceUnavailableException(
+          'Object storage is temporarily unavailable',
+        );
+      }
+    }
+
+    await this.prisma.uploadSession.updateMany({
+      where: {
+        id: session.id,
+        ownerId,
+        status: 'ABORTING',
+      },
+      data: {
+        status: 'ABORTED',
+      },
     });
   }
 

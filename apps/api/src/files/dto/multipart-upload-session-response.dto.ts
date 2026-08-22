@@ -53,6 +53,7 @@ export class MultipartUploadSessionResponseDto {
       'ABORTED',
       'EXPIRED',
       'FAILED',
+      'ABORTING',
     ],
   })
   status!: string;
