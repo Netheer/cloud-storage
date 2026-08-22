@@ -35,6 +35,7 @@ const MULTIPART_UPLOAD_MAX_SIZE_BYTES = 5n * 1024n * 1024n * 1024n;
 const MULTIPART_UPLOAD_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_MULTIPART_PARTS = 10_000;
 const MULTIPART_PART_URL_TTL_SECONDS = 15 * 60;
+const MULTIPART_COMPLETION_RECOVERY_DELAY_MS = 30 * 1000;
 
 const FILE_SELECT = {
   id: true,
@@ -104,6 +105,16 @@ type FileRecord = {
     mimeType: string | null;
     size: bigint;
   } | null;
+};
+
+type FinalizeMultipartUploadInput = {
+  ownerId: string;
+  uploadSessionId: string;
+  folderId: string | null;
+  objectKey: string;
+  originalName: string;
+  mimeType: string | null;
+  totalSize: bigint;
 };
 
 @Injectable()
@@ -474,6 +485,215 @@ export class FilesService {
       ...this.toMultipartUploadSessionResponseDto(responseSession),
       uploadedParts,
     };
+  }
+
+  async completeMultipartUpload(
+    ownerId: string,
+    uploadSessionId: string,
+  ): Promise<FileResponseDto> {
+    const session = await this.prisma.uploadSession.findFirst({
+      where: {
+        id: uploadSessionId,
+        ownerId,
+      },
+      select: {
+        id: true,
+        folderId: true,
+        fileId: true,
+        originalName: true,
+        mimeType: true,
+        totalSize: true,
+        partSize: true,
+        totalParts: true,
+        objectKey: true,
+        multipartUploadId: true,
+        status: true,
+        expiresAt: true,
+        updatedAt: true,
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Multipart upload session not found');
+    }
+
+    if (session.status === 'COMPLETED') {
+      if (!session.fileId) {
+        throw new InternalServerErrorException(
+          'Completed multipart upload has no file metadata',
+        );
+      }
+
+      return this.getCompletedMultipartFile(ownerId, session.fileId);
+    }
+
+    if (session.status === 'EXPIRED') {
+      throw new GoneException('Multipart upload session has expired');
+    }
+
+    if (
+      session.status === 'UPLOADING' &&
+      session.expiresAt.getTime() <= Date.now()
+    ) {
+      await this.prisma.uploadSession.updateMany({
+        where: {
+          id: session.id,
+          ownerId,
+          status: 'UPLOADING',
+        },
+        data: {
+          status: 'EXPIRED',
+        },
+      });
+
+      throw new GoneException('Multipart upload session has expired');
+    }
+
+    if (
+      session.status === 'COMPLETING' &&
+      Date.now() - session.updatedAt.getTime() <
+        MULTIPART_COMPLETION_RECOVERY_DELAY_MS
+    ) {
+      throw new ConflictException(
+        'Multipart upload completion is already in progress',
+      );
+    }
+
+    if (session.status !== 'UPLOADING' && session.status !== 'COMPLETING') {
+      throw new ConflictException(
+        'Multipart upload session cannot be completed',
+      );
+    }
+
+    if (!session.multipartUploadId) {
+      throw new InternalServerErrorException(
+        'Multipart upload session metadata is incomplete',
+      );
+    }
+
+    if (session.status === 'UPLOADING') {
+      const claimedSession = await this.prisma.uploadSession.updateMany({
+        where: {
+          id: session.id,
+          ownerId,
+          status: 'UPLOADING',
+        },
+        data: {
+          status: 'COMPLETING',
+        },
+      });
+
+      if (claimedSession.count === 0) {
+        const currentSession = await this.prisma.uploadSession.findFirst({
+          where: {
+            id: session.id,
+            ownerId,
+          },
+          select: {
+            status: true,
+            fileId: true,
+          },
+        });
+
+        if (currentSession?.status === 'COMPLETED' && currentSession.fileId) {
+          return this.getCompletedMultipartFile(ownerId, currentSession.fileId);
+        }
+
+        throw new ConflictException(
+          'Multipart upload completion is already in progress',
+        );
+      }
+    }
+
+    const existingObject = await this.getMultipartObjectMetadata(
+      session.objectKey,
+    );
+
+    if (existingObject) {
+      this.ensureCompletedObjectSize(existingObject.size, session.totalSize);
+
+      return this.finalizeMultipartUploadMetadata({
+        ownerId,
+        uploadSessionId: session.id,
+        folderId: session.folderId,
+        objectKey: session.objectKey,
+        originalName: session.originalName,
+        mimeType: session.mimeType,
+        totalSize: session.totalSize,
+      });
+    }
+
+    let storageParts: MultipartUploadPart[];
+
+    try {
+      storageParts = await this.objectStorage.listMultipartUploadParts({
+        objectKey: session.objectKey,
+        uploadId: session.multipartUploadId,
+      });
+    } catch {
+      throw new ServiceUnavailableException(
+        'Object storage is temporarily unavailable',
+      );
+    }
+
+    const normalizedParts = this.normalizeMultipartParts(
+      storageParts,
+      session.totalParts,
+    );
+
+    if (
+      !this.isCompleteMultipartPartSet(
+        normalizedParts,
+        session.totalSize,
+        session.partSize,
+        session.totalParts,
+      )
+    ) {
+      await this.returnMultipartSessionToUploading(session.id);
+
+      throw new ConflictException(
+        'Not all multipart upload parts have been uploaded',
+      );
+    }
+
+    await this.replaceStoredMultipartParts(session.id, normalizedParts);
+
+    try {
+      await this.objectStorage.completeMultipartUpload({
+        objectKey: session.objectKey,
+        uploadId: session.multipartUploadId,
+        parts: normalizedParts.map((part) => ({
+          partNumber: part.partNumber,
+          etag: part.etag,
+        })),
+      });
+    } catch {
+      throw new ServiceUnavailableException(
+        'Object storage is temporarily unavailable',
+      );
+    }
+
+    const completedObject = await this.getMultipartObjectMetadata(
+      session.objectKey,
+    );
+
+    if (!completedObject) {
+      throw new ServiceUnavailableException(
+        'Completed object is temporarily unavailable',
+      );
+    }
+
+    this.ensureCompletedObjectSize(completedObject.size, session.totalSize);
+
+    return this.finalizeMultipartUploadMetadata({
+      ownerId,
+      uploadSessionId: session.id,
+      folderId: session.folderId,
+      objectKey: session.objectKey,
+      originalName: session.originalName,
+      mimeType: session.mimeType,
+      totalSize: session.totalSize,
+    });
   }
 
   async list(ownerId: string, folderId?: string): Promise<FileResponseDto[]> {
@@ -972,5 +1192,224 @@ export class FilesService {
         trace,
       );
     }
+  }
+
+  private async getMultipartObjectMetadata(
+    objectKey: string,
+  ): Promise<{ size: number } | null> {
+    try {
+      return await this.objectStorage.getObjectMetadata(objectKey);
+    } catch {
+      throw new ServiceUnavailableException(
+        'Object storage is temporarily unavailable',
+      );
+    }
+  }
+
+  private ensureCompletedObjectSize(
+    actualSize: number,
+    expectedSize: bigint,
+  ): void {
+    if (
+      !Number.isSafeInteger(actualSize) ||
+      actualSize < 0 ||
+      BigInt(actualSize) !== expectedSize
+    ) {
+      throw new InternalServerErrorException(
+        'Completed object size does not match upload metadata',
+      );
+    }
+  }
+
+  private isCompleteMultipartPartSet(
+    parts: MultipartUploadPart[],
+    totalSize: bigint,
+    partSize: bigint,
+    totalParts: number,
+  ): boolean {
+    if (parts.length !== totalParts) {
+      return false;
+    }
+
+    for (let index = 0; index < parts.length; index += 1) {
+      const part = parts[index];
+      const expectedPartNumber = index + 1;
+
+      if (!part || part.partNumber !== expectedPartNumber) {
+        return false;
+      }
+
+      const expectedSize =
+        expectedPartNumber === totalParts
+          ? totalSize - partSize * BigInt(totalParts - 1)
+          : partSize;
+
+      if (BigInt(part.size) !== expectedSize) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private async returnMultipartSessionToUploading(
+    uploadSessionId: string,
+  ): Promise<void> {
+    await this.prisma.uploadSession.updateMany({
+      where: {
+        id: uploadSessionId,
+        status: 'COMPLETING',
+        fileId: null,
+      },
+      data: {
+        status: 'UPLOADING',
+      },
+    });
+  }
+
+  private async getCompletedMultipartFile(
+    ownerId: string,
+    fileId: string,
+  ): Promise<FileResponseDto> {
+    const file = await this.prisma.file.findFirst({
+      where: {
+        id: fileId,
+        ownerId,
+        status: 'READY',
+        deletedAt: null,
+      },
+      select: FILE_SELECT,
+    });
+
+    if (!file) {
+      throw new InternalServerErrorException(
+        'Completed multipart file metadata is missing',
+      );
+    }
+
+    return this.toResponseDto(file);
+  }
+
+  private async finalizeMultipartUploadMetadata(
+    input: FinalizeMultipartUploadInput,
+  ): Promise<FileResponseDto> {
+    return this.prisma.$transaction(async (transaction) => {
+      const lockedSessions = await transaction.$queryRaw<Array<{ id: string }>>`
+        SELECT "id"
+        FROM "UploadSession"
+        WHERE "id" = ${input.uploadSessionId}::uuid
+        FOR UPDATE
+      `;
+
+      if (lockedSessions.length === 0) {
+        throw new NotFoundException('Multipart upload session not found');
+      }
+
+      const lockedSession = await transaction.uploadSession.findUnique({
+        where: {
+          id: input.uploadSessionId,
+        },
+        select: {
+          status: true,
+          fileId: true,
+        },
+      });
+
+      if (!lockedSession) {
+        throw new NotFoundException('Multipart upload session not found');
+      }
+
+      if (lockedSession.status === 'COMPLETED') {
+        if (!lockedSession.fileId) {
+          throw new InternalServerErrorException(
+            'Completed multipart upload has no file metadata',
+          );
+        }
+
+        const completedFile = await transaction.file.findFirst({
+          where: {
+            id: lockedSession.fileId,
+            ownerId: input.ownerId,
+            status: 'READY',
+            deletedAt: null,
+          },
+          select: FILE_SELECT,
+        });
+
+        if (!completedFile) {
+          throw new InternalServerErrorException(
+            'Completed multipart file metadata is missing',
+          );
+        }
+
+        return this.toResponseDto(completedFile);
+      }
+
+      if (lockedSession.status !== 'COMPLETING') {
+        throw new ConflictException(
+          'Multipart upload session cannot be finalized',
+        );
+      }
+
+      const fileMetadata = await transaction.file.create({
+        data: {
+          name: input.originalName,
+          ownerId: input.ownerId,
+          folderId: input.folderId,
+          status: 'UPLOADING',
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      const storedObject = await transaction.storedObject.create({
+        data: {
+          objectKey: input.objectKey,
+          size: input.totalSize,
+          referenceCount: 1,
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      const version = await transaction.fileVersion.create({
+        data: {
+          fileId: fileMetadata.id,
+          storedObjectId: storedObject.id,
+          versionNumber: 1,
+          originalName: input.originalName,
+          mimeType: input.mimeType,
+          size: input.totalSize,
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      const completedFile = await transaction.file.update({
+        where: {
+          id: fileMetadata.id,
+        },
+        data: {
+          currentVersionId: version.id,
+          status: 'READY',
+        },
+        select: FILE_SELECT,
+      });
+
+      await transaction.uploadSession.update({
+        where: {
+          id: input.uploadSessionId,
+        },
+        data: {
+          fileId: completedFile.id,
+          status: 'COMPLETED',
+        },
+      });
+
+      return this.toResponseDto(completedFile);
+    });
   }
 }

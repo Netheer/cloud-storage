@@ -1367,4 +1367,285 @@ describe('Files (e2e)', () => {
 
     expect(storedParts).toBe(0);
   });
+
+  it('completes a multipart upload idempotently', async () => {
+    const totalSize = 11 * 1024 * 1024;
+
+    const initiationResponse = await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'completed-multipart.bin',
+        mimeType: 'application/octet-stream',
+        totalSize: totalSize.toString(),
+        folderId: null,
+      })
+      .expect(201);
+
+    const initiationBody = initiationResponse.body as {
+      id?: unknown;
+    };
+
+    if (typeof initiationBody.id !== 'string') {
+      throw new Error('Multipart upload session ID is missing');
+    }
+
+    const sessionBeforeCompletion = await prisma.uploadSession.findUnique({
+      where: {
+        id: initiationBody.id,
+      },
+    });
+
+    if (!sessionBeforeCompletion?.multipartUploadId) {
+      throw new Error('Multipart upload metadata is missing');
+    }
+
+    listMultipartUploadPartsMock.mockResolvedValue([
+      {
+        partNumber: 1,
+        etag: '"complete-etag-1"',
+        size: 8 * 1024 * 1024,
+      },
+      {
+        partNumber: 2,
+        etag: '"complete-etag-2"',
+        size: 3 * 1024 * 1024,
+      },
+    ]);
+
+    getObjectMetadataMock.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      size: totalSize,
+      contentType: 'application/octet-stream',
+      etag: '"completed-object-etag"',
+    });
+
+    const completionResponse = await request(app.getHttpServer())
+      .post(`/files/multipart/${initiationBody.id}/complete`)
+      .set(authorization(owner.accessToken))
+      .expect(200);
+
+    const completedFile = completionResponse.body as FileBody;
+
+    expect(completedFile).toMatchObject({
+      name: 'completed-multipart.bin',
+      ownerId: owner.id,
+      folderId: null,
+      status: 'READY',
+      mimeType: 'application/octet-stream',
+      size: totalSize.toString(),
+    });
+
+    expect(completeMultipartUploadMock).toHaveBeenCalledWith({
+      objectKey: sessionBeforeCompletion.objectKey,
+      uploadId: sessionBeforeCompletion.multipartUploadId,
+      parts: [
+        {
+          partNumber: 1,
+          etag: '"complete-etag-1"',
+        },
+        {
+          partNumber: 2,
+          etag: '"complete-etag-2"',
+        },
+      ],
+    });
+
+    const completedSession = await prisma.uploadSession.findUnique({
+      where: {
+        id: initiationBody.id,
+      },
+    });
+
+    expect(completedSession).toMatchObject({
+      status: 'COMPLETED',
+      fileId: completedFile.id,
+    });
+
+    const completedFileMetadata = await prisma.file.findUnique({
+      where: {
+        id: completedFile.id,
+      },
+      select: {
+        currentVersion: {
+          select: {
+            storedObject: {
+              select: {
+                objectKey: true,
+                size: true,
+                referenceCount: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(completedFileMetadata?.currentVersion?.storedObject).toMatchObject({
+      objectKey: sessionBeforeCompletion.objectKey,
+      size: BigInt(totalSize),
+      referenceCount: 1,
+    });
+
+    const repeatedResponse = await request(app.getHttpServer())
+      .post(`/files/multipart/${initiationBody.id}/complete`)
+      .set(authorization(owner.accessToken))
+      .expect(200);
+
+    expect(repeatedResponse.body).toMatchObject({
+      id: completedFile.id,
+      status: 'READY',
+    });
+
+    expect(completeMultipartUploadMock).toHaveBeenCalledTimes(1);
+    expect(listMultipartUploadPartsMock).toHaveBeenCalledTimes(1);
+    expect(getObjectMetadataMock).toHaveBeenCalledTimes(2);
+
+    expect(
+      await prisma.file.count({
+        where: {
+          id: completedFile.id,
+        },
+      }),
+    ).toBe(1);
+
+    await request(app.getHttpServer())
+      .post(`/files/multipart/${initiationBody.id}/complete`)
+      .set(authorization(otherUser.accessToken))
+      .expect(404);
+  });
+
+  it('returns an incomplete multipart session to uploading state', async () => {
+    const initiationResponse = await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'incomplete-multipart.bin',
+        totalSize: (11 * 1024 * 1024).toString(),
+      })
+      .expect(201);
+
+    const initiationBody = initiationResponse.body as {
+      id?: unknown;
+    };
+
+    if (typeof initiationBody.id !== 'string') {
+      throw new Error('Multipart upload session ID is missing');
+    }
+
+    listMultipartUploadPartsMock.mockResolvedValue([
+      {
+        partNumber: 1,
+        etag: '"incomplete-etag-1"',
+        size: 8 * 1024 * 1024,
+      },
+    ]);
+
+    await request(app.getHttpServer())
+      .post(`/files/multipart/${initiationBody.id}/complete`)
+      .set(authorization(owner.accessToken))
+      .expect(409);
+
+    const incompleteSession = await prisma.uploadSession.findUnique({
+      where: {
+        id: initiationBody.id,
+      },
+      select: {
+        status: true,
+        fileId: true,
+      },
+    });
+
+    expect(incompleteSession).toEqual({
+      status: 'UPLOADING',
+      fileId: null,
+    });
+
+    expect(completeMultipartUploadMock).not.toHaveBeenCalled();
+
+    expect(
+      await prisma.file.count({
+        where: {
+          uploads: {
+            some: {
+              id: initiationBody.id,
+            },
+          },
+        },
+      }),
+    ).toBe(0);
+  });
+
+  it('recovers completion when the object already exists in storage', async () => {
+    const totalSize = 11 * 1024 * 1024;
+
+    const initiationResponse = await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'recovered-multipart.bin',
+        mimeType: 'application/octet-stream',
+        totalSize: totalSize.toString(),
+      })
+      .expect(201);
+
+    const initiationBody = initiationResponse.body as {
+      id?: unknown;
+    };
+
+    if (typeof initiationBody.id !== 'string') {
+      throw new Error('Multipart upload session ID is missing');
+    }
+
+    await prisma.uploadSession.update({
+      where: {
+        id: initiationBody.id,
+      },
+      data: {
+        status: 'COMPLETING',
+        updatedAt: new Date(Date.now() - 60_000),
+      },
+    });
+
+    getObjectMetadataMock.mockResolvedValueOnce({
+      size: totalSize,
+      contentType: 'application/octet-stream',
+      etag: '"recovered-object-etag"',
+    });
+
+    const response = await request(app.getHttpServer())
+      .post(`/files/multipart/${initiationBody.id}/complete`)
+      .set(authorization(owner.accessToken))
+      .expect(200);
+
+    const recoveredFile = response.body as FileBody;
+
+    expect(recoveredFile).toMatchObject({
+      name: 'recovered-multipart.bin',
+      ownerId: owner.id,
+      status: 'READY',
+      size: totalSize.toString(),
+    });
+
+    expect(listMultipartUploadPartsMock).not.toHaveBeenCalled();
+    expect(completeMultipartUploadMock).not.toHaveBeenCalled();
+    expect(getObjectMetadataMock).toHaveBeenCalledTimes(1);
+
+    const recoveredSession = await prisma.uploadSession.findUnique({
+      where: {
+        id: initiationBody.id,
+      },
+      select: {
+        status: true,
+        fileId: true,
+      },
+    });
+
+    expect(recoveredSession).toEqual({
+      status: 'COMPLETED',
+      fileId: recoveredFile.id,
+    });
+  });
 });

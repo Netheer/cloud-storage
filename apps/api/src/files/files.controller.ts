@@ -276,6 +276,45 @@ export class FilesController {
     return this.filesService.createDownloadUrl(user.id, fileId);
   }
 
+  @Post('multipart/:sessionId/complete')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Complete a multipart upload and create file metadata',
+  })
+  @ApiParam({
+    name: 'sessionId',
+    format: 'uuid',
+    description: 'Multipart upload session ID',
+  })
+  @ApiOkResponse({
+    description: 'Multipart upload completed successfully',
+    type: FileResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'Session ID is invalid',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Access token is missing or invalid',
+  })
+  @ApiNotFoundResponse({
+    description: 'Multipart upload session not found',
+  })
+  @ApiConflictResponse({
+    description: 'Upload is incomplete or cannot be completed',
+  })
+  @ApiGoneResponse({
+    description: 'Multipart upload session has expired',
+  })
+  @ApiServiceUnavailableResponse({
+    description: 'Object storage is temporarily unavailable',
+  })
+  completeMultipartUpload(
+    @CurrentUser() user: UserResponseDto,
+    @Param('sessionId', ParseUUIDPipe) uploadSessionId: string,
+  ): Promise<FileResponseDto> {
+    return this.filesService.completeMultipartUpload(user.id, uploadSessionId);
+  }
+
   @Patch(':id/move')
   @ApiOperation({
     summary: 'Move a file to another folder or to root',
