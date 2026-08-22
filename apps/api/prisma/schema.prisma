@@ -115,10 +115,13 @@ model UploadSession {
   ownerId           String       @db.Uuid
   folderId          String?      @db.Uuid
   fileId            String?      @db.Uuid
+  clientRequestId   String       @db.Uuid
   objectKey         String       @unique
   originalName      String
   mimeType          String?
   totalSize         BigInt
+  partSize          BigInt
+  totalParts        Int
   multipartUploadId String?
   status            UploadStatus @default(CREATED)
   expiresAt         DateTime
@@ -130,6 +133,7 @@ model UploadSession {
   file   File?        @relation(fields: [fileId], references: [id], onDelete: SetNull)
   parts  UploadPart[]
 
+  @@unique([ownerId, clientRequestId])
   @@index([ownerId])
   @@index([status, expiresAt])
 }
