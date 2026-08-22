@@ -35,6 +35,7 @@ import {
   ApiGoneResponse,
 } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { MultipartUploadStatusResponseDto } from './dto/multipart-upload-status-response.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { UserResponseDto } from '../users/dto/user-response.dto';
 import { FileResponseDto } from './dto/file-response.dto';
@@ -212,6 +213,38 @@ export class FilesController {
     @Query() query: ListFilesQueryDto,
   ): Promise<FileResponseDto[]> {
     return this.filesService.list(user.id, query.folderId);
+  }
+
+  @Get('multipart/:sessionId')
+  @ApiOperation({
+    summary: 'Get multipart upload state and uploaded parts',
+  })
+  @ApiParam({
+    name: 'sessionId',
+    format: 'uuid',
+    description: 'Multipart upload session ID',
+  })
+  @ApiOkResponse({
+    description: 'Multipart upload state returned successfully',
+    type: MultipartUploadStatusResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'Session ID is invalid',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Access token is missing or invalid',
+  })
+  @ApiNotFoundResponse({
+    description: 'Multipart upload session not found',
+  })
+  @ApiServiceUnavailableResponse({
+    description: 'Object storage is temporarily unavailable',
+  })
+  getMultipartUploadStatus(
+    @CurrentUser() user: UserResponseDto,
+    @Param('sessionId', ParseUUIDPipe) uploadSessionId: string,
+  ): Promise<MultipartUploadStatusResponseDto> {
+    return this.filesService.getMultipartUploadStatus(user.id, uploadSessionId);
   }
 
   @Get(':id/download')

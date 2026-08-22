@@ -1138,4 +1138,227 @@ describe('Files (e2e)', () => {
       .set(authorization(owner.accessToken))
       .expect(503);
   });
+
+  it('returns and persists uploaded multipart parts', async () => {
+    const initiationResponse = await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'multipart-status.bin',
+        mimeType: 'application/octet-stream',
+        totalSize: (11 * 1024 * 1024).toString(),
+      })
+      .expect(201);
+
+    const initiationBody = initiationResponse.body as {
+      id?: unknown;
+    };
+
+    if (typeof initiationBody.id !== 'string') {
+      throw new Error('Multipart upload session ID is missing');
+    }
+
+    listMultipartUploadPartsMock.mockResolvedValue([
+      {
+        partNumber: 2,
+        etag: '"etag-2"',
+        size: 3 * 1024 * 1024,
+      },
+      {
+        partNumber: 1,
+        etag: '"etag-1"',
+        size: 8 * 1024 * 1024,
+      },
+    ]);
+
+    const response = await request(app.getHttpServer())
+      .get(`/files/multipart/${initiationBody.id}`)
+      .set(authorization(owner.accessToken))
+      .expect(200);
+
+    const body = response.body as {
+      id?: unknown;
+      status?: unknown;
+      uploadedParts?: unknown;
+    };
+
+    expect(body).toMatchObject({
+      id: initiationBody.id,
+      status: 'UPLOADING',
+      uploadedParts: [
+        {
+          partNumber: 1,
+          etag: '"etag-1"',
+          size: (8 * 1024 * 1024).toString(),
+        },
+        {
+          partNumber: 2,
+          etag: '"etag-2"',
+          size: (3 * 1024 * 1024).toString(),
+        },
+      ],
+    });
+
+    const storedParts = await prisma.uploadPart.findMany({
+      where: {
+        uploadSessionId: initiationBody.id,
+      },
+      orderBy: {
+        partNumber: 'asc',
+      },
+    });
+
+    expect(storedParts).toMatchObject([
+      {
+        partNumber: 1,
+        etag: '"etag-1"',
+        size: BigInt(8 * 1024 * 1024),
+      },
+      {
+        partNumber: 2,
+        etag: '"etag-2"',
+        size: BigInt(3 * 1024 * 1024),
+      },
+    ]);
+
+    await request(app.getHttpServer())
+      .get(`/files/multipart/${initiationBody.id}`)
+      .set(authorization(otherUser.accessToken))
+      .expect(404);
+
+    await request(app.getHttpServer())
+      .get('/files/multipart/not-a-uuid')
+      .set(authorization(owner.accessToken))
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .get(`/files/multipart/${initiationBody.id}`)
+      .expect(401);
+
+    listMultipartUploadPartsMock.mockResolvedValue([
+      {
+        partNumber: 1,
+        etag: '"replaced-etag-1"',
+        size: 8 * 1024 * 1024,
+      },
+    ]);
+
+    await request(app.getHttpServer())
+      .get(`/files/multipart/${initiationBody.id}`)
+      .set(authorization(owner.accessToken))
+      .expect(200);
+
+    const replacedParts = await prisma.uploadPart.findMany({
+      where: {
+        uploadSessionId: initiationBody.id,
+      },
+      orderBy: {
+        partNumber: 'asc',
+      },
+    });
+
+    expect(replacedParts).toHaveLength(1);
+    expect(replacedParts[0]).toMatchObject({
+      partNumber: 1,
+      etag: '"replaced-etag-1"',
+      size: BigInt(8 * 1024 * 1024),
+    });
+
+    expect(listMultipartUploadPartsMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns stored parts for an expired multipart session', async () => {
+    const initiationResponse = await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'expired-status.bin',
+        totalSize: (11 * 1024 * 1024).toString(),
+      })
+      .expect(201);
+
+    const initiationBody = initiationResponse.body as {
+      id?: unknown;
+    };
+
+    if (typeof initiationBody.id !== 'string') {
+      throw new Error('Multipart upload session ID is missing');
+    }
+
+    await prisma.uploadPart.create({
+      data: {
+        uploadSessionId: initiationBody.id,
+        partNumber: 1,
+        etag: '"stored-etag-1"',
+        size: BigInt(8 * 1024 * 1024),
+      },
+    });
+
+    await prisma.uploadSession.update({
+      where: {
+        id: initiationBody.id,
+      },
+      data: {
+        expiresAt: new Date(Date.now() - 1000),
+      },
+    });
+
+    const response = await request(app.getHttpServer())
+      .get(`/files/multipart/${initiationBody.id}`)
+      .set(authorization(owner.accessToken))
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      id: initiationBody.id,
+      status: 'EXPIRED',
+      uploadedParts: [
+        {
+          partNumber: 1,
+          etag: '"stored-etag-1"',
+          size: (8 * 1024 * 1024).toString(),
+        },
+      ],
+    });
+
+    expect(listMultipartUploadPartsMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 503 when uploaded multipart parts cannot be listed', async () => {
+    const initiationResponse = await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'status-storage-failure.bin',
+        totalSize: (11 * 1024 * 1024).toString(),
+      })
+      .expect(201);
+
+    const initiationBody = initiationResponse.body as {
+      id?: unknown;
+    };
+
+    if (typeof initiationBody.id !== 'string') {
+      throw new Error('Multipart upload session ID is missing');
+    }
+
+    listMultipartUploadPartsMock.mockRejectedValueOnce(
+      new Error('Storage is unavailable'),
+    );
+
+    await request(app.getHttpServer())
+      .get(`/files/multipart/${initiationBody.id}`)
+      .set(authorization(owner.accessToken))
+      .expect(503);
+
+    const storedParts = await prisma.uploadPart.count({
+      where: {
+        uploadSessionId: initiationBody.id,
+      },
+    });
+
+    expect(storedParts).toBe(0);
+  });
 });

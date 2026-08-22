@@ -13,8 +13,13 @@ import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../database/prisma.service';
 import {
   OBJECT_STORAGE,
+  type MultipartUploadPart,
   type ObjectStorage,
 } from '../storage/object-storage.interface';
+import type {
+  MultipartUploadedPartResponseDto,
+  MultipartUploadStatusResponseDto,
+} from './dto/multipart-upload-status-response.dto';
 import type { InitiateMultipartUploadDto } from './dto/initiate-multipart-upload.dto';
 import type { MultipartUploadSessionResponseDto } from './dto/multipart-upload-session-response.dto';
 import type { MultipartUploadPartUrlResponseDto } from './dto/multipart-upload-part-url-response.dto';
@@ -75,6 +80,16 @@ type MultipartSessionRecord = {
   expiresAt: Date;
   fileId: string | null;
   objectKey: string;
+};
+
+type MultipartStatusSessionRecord = MultipartSessionRecord & {
+  multipartUploadId: string | null;
+};
+
+type StoredMultipartPartRecord = {
+  partNumber: number;
+  etag: string;
+  size: bigint;
 };
 
 type FileRecord = {
@@ -372,6 +387,93 @@ export class FilesService {
         'Object storage is temporarily unavailable',
       );
     }
+  }
+
+  async getMultipartUploadStatus(
+    ownerId: string,
+    uploadSessionId: string,
+  ): Promise<MultipartUploadStatusResponseDto> {
+    const session = await this.prisma.uploadSession.findFirst({
+      where: {
+        id: uploadSessionId,
+        ownerId,
+      },
+      select: {
+        ...MULTIPART_SESSION_SELECT,
+        multipartUploadId: true,
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Multipart upload session not found');
+    }
+
+    let responseSession: MultipartStatusSessionRecord = session;
+    let uploadedParts: MultipartUploadedPartResponseDto[];
+
+    if (
+      session.status === 'UPLOADING' &&
+      session.expiresAt.getTime() <= Date.now()
+    ) {
+      await this.prisma.uploadSession.updateMany({
+        where: {
+          id: session.id,
+          ownerId,
+          status: 'UPLOADING',
+        },
+        data: {
+          status: 'EXPIRED',
+        },
+      });
+
+      responseSession = {
+        ...session,
+        status: 'EXPIRED',
+      };
+
+      const storedParts = await this.getStoredMultipartParts(session.id);
+      uploadedParts = this.toStoredMultipartPartResponseDtos(storedParts);
+    } else if (session.status === 'UPLOADING') {
+      if (!session.multipartUploadId) {
+        throw new InternalServerErrorException(
+          'Multipart upload session metadata is incomplete',
+        );
+      }
+
+      let storageParts: MultipartUploadPart[];
+
+      try {
+        storageParts = await this.objectStorage.listMultipartUploadParts({
+          objectKey: session.objectKey,
+          uploadId: session.multipartUploadId,
+        });
+      } catch {
+        throw new ServiceUnavailableException(
+          'Object storage is temporarily unavailable',
+        );
+      }
+
+      const normalizedParts = this.normalizeMultipartParts(
+        storageParts,
+        session.totalParts,
+      );
+
+      await this.replaceStoredMultipartParts(session.id, normalizedParts);
+
+      uploadedParts = normalizedParts.map((part) => ({
+        partNumber: part.partNumber,
+        etag: part.etag,
+        size: part.size.toString(),
+      }));
+    } else {
+      const storedParts = await this.getStoredMultipartParts(session.id);
+      uploadedParts = this.toStoredMultipartPartResponseDtos(storedParts);
+    }
+
+    return {
+      ...this.toMultipartUploadSessionResponseDto(responseSession),
+      uploadedParts,
+    };
   }
 
   async list(ownerId: string, folderId?: string): Promise<FileResponseDto[]> {
@@ -673,6 +775,86 @@ export class FilesService {
       expiresAt: session.expiresAt,
       fileId: session.fileId,
     };
+  }
+
+  private normalizeMultipartParts(
+    parts: MultipartUploadPart[],
+    totalParts: number,
+  ): MultipartUploadPart[] {
+    const normalizedParts = [...parts].sort(
+      (left, right) => left.partNumber - right.partNumber,
+    );
+
+    for (const part of normalizedParts) {
+      if (
+        !Number.isInteger(part.partNumber) ||
+        part.partNumber < 1 ||
+        part.partNumber > totalParts ||
+        !Number.isSafeInteger(part.size) ||
+        part.size < 0 ||
+        !part.etag
+      ) {
+        throw new InternalServerErrorException(
+          'Object storage returned invalid multipart part metadata',
+        );
+      }
+    }
+
+    return normalizedParts;
+  }
+
+  private async replaceStoredMultipartParts(
+    uploadSessionId: string,
+    parts: MultipartUploadPart[],
+  ): Promise<void> {
+    await this.prisma.$transaction(async (transaction) => {
+      await transaction.uploadPart.deleteMany({
+        where: {
+          uploadSessionId,
+        },
+      });
+
+      if (parts.length === 0) {
+        return;
+      }
+
+      await transaction.uploadPart.createMany({
+        data: parts.map((part) => ({
+          uploadSessionId,
+          partNumber: part.partNumber,
+          etag: part.etag,
+          size: BigInt(part.size),
+        })),
+      });
+    });
+  }
+
+  private getStoredMultipartParts(
+    uploadSessionId: string,
+  ): Promise<StoredMultipartPartRecord[]> {
+    return this.prisma.uploadPart.findMany({
+      where: {
+        uploadSessionId,
+      },
+      orderBy: {
+        partNumber: 'asc',
+      },
+      select: {
+        partNumber: true,
+        etag: true,
+        size: true,
+      },
+    });
+  }
+
+  private toStoredMultipartPartResponseDtos(
+    parts: StoredMultipartPartRecord[],
+  ): MultipartUploadedPartResponseDto[] {
+    return parts.map((part) => ({
+      partNumber: part.partNumber,
+      etag: part.etag,
+      size: part.size.toString(),
+    }));
   }
 
   private async markMultipartSessionFailed(
