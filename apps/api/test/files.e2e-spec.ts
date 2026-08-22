@@ -60,6 +60,8 @@ describe('Files (e2e)', () => {
   const abortMultipartUploadMock =
     jest.fn<ObjectStorage['abortMultipartUpload']>();
 
+  const getObjectMetadataMock = jest.fn<ObjectStorage['getObjectMetadata']>();
+
   const objectStorageMock: ObjectStorage = {
     checkHealth: checkHealthMock,
     putObject: putObjectMock,
@@ -70,6 +72,7 @@ describe('Files (e2e)', () => {
     listMultipartUploadParts: listMultipartUploadPartsMock,
     completeMultipartUpload: completeMultipartUploadMock,
     abortMultipartUpload: abortMultipartUploadMock,
+    getObjectMetadata: getObjectMetadataMock,
   };
 
   beforeAll(async () => {
@@ -131,6 +134,9 @@ describe('Files (e2e)', () => {
 
     abortMultipartUploadMock.mockReset();
     abortMultipartUploadMock.mockResolvedValue(undefined);
+
+    getObjectMetadataMock.mockReset();
+    getObjectMetadataMock.mockResolvedValue(null);
   });
 
   afterAll(async () => {

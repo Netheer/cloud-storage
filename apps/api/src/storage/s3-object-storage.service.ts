@@ -11,6 +11,8 @@ import {
   PutObjectCommand,
   S3Client,
   UploadPartCommand,
+  HeadObjectCommand,
+  S3ServiceException,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
@@ -24,6 +26,7 @@ import {
   type MultipartUploadPart,
   type ObjectStorage,
   type PutObjectInput,
+  type ObjectMetadata,
 } from './object-storage.interface';
 
 @Injectable()
@@ -83,6 +86,36 @@ export class S3ObjectStorageService implements ObjectStorage, OnModuleDestroy {
         Key: objectKey,
       }),
     );
+  }
+
+  async getObjectMetadata(objectKey: string): Promise<ObjectMetadata | null> {
+    try {
+      const result = await this.client.send(
+        new HeadObjectCommand({
+          Bucket: this.bucket,
+          Key: objectKey,
+        }),
+      );
+
+      if (result.ContentLength === undefined) {
+        throw new Error('Object storage returned incomplete object metadata');
+      }
+
+      return {
+        size: result.ContentLength,
+        contentType: result.ContentType,
+        etag: result.ETag,
+      };
+    } catch (error: unknown) {
+      if (
+        error instanceof S3ServiceException &&
+        error.$metadata.httpStatusCode === 404
+      ) {
+        return null;
+      }
+
+      throw error;
+    }
   }
 
   async createPresignedDownloadUrl(

@@ -56,6 +56,12 @@ export interface AbortMultipartUploadInput {
   uploadId: string;
 }
 
+export interface ObjectMetadata {
+  size: number;
+  contentType?: string;
+  etag?: string;
+}
+
 export interface ObjectStorage {
   checkHealth(): Promise<void>;
 
@@ -82,4 +88,6 @@ export interface ObjectStorage {
   completeMultipartUpload(input: CompleteMultipartUploadInput): Promise<void>;
 
   abortMultipartUpload(input: AbortMultipartUploadInput): Promise<void>;
+
+  getObjectMetadata(objectKey: string): Promise<ObjectMetadata | null>;
 }
