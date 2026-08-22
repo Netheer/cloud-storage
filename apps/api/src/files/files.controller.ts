@@ -14,6 +14,7 @@ import {
   Delete,
   HttpCode,
   HttpStatus,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
@@ -31,6 +32,7 @@ import {
   ApiNoContentResponse,
   ApiConflictResponse,
   ApiServiceUnavailableResponse,
+  ApiGoneResponse,
 } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -44,6 +46,7 @@ import { RenameFileDto } from './dto/rename-file.dto';
 import { MoveFileDto } from './dto/move-file.dto';
 import { InitiateMultipartUploadDto } from './dto/initiate-multipart-upload.dto';
 import { MultipartUploadSessionResponseDto } from './dto/multipart-upload-session-response.dto';
+import { MultipartUploadPartUrlResponseDto } from './dto/multipart-upload-part-url-response.dto';
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 
@@ -136,6 +139,54 @@ export class FilesController {
     @Body() dto: InitiateMultipartUploadDto,
   ): Promise<MultipartUploadSessionResponseDto> {
     return this.filesService.initiateMultipartUpload(user.id, dto);
+  }
+
+  @Post('multipart/:sessionId/parts/:partNumber')
+  @ApiOperation({
+    summary: 'Create a temporary URL for uploading one file part',
+  })
+  @ApiParam({
+    name: 'sessionId',
+    format: 'uuid',
+    description: 'Multipart upload session ID',
+  })
+  @ApiParam({
+    name: 'partNumber',
+    type: Number,
+    description: 'Part number starting from 1',
+  })
+  @ApiCreatedResponse({
+    description: 'Temporary upload URL created successfully',
+    type: MultipartUploadPartUrlResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'Session ID or part number is invalid',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Access token is missing or invalid',
+  })
+  @ApiNotFoundResponse({
+    description: 'Multipart upload session not found',
+  })
+  @ApiConflictResponse({
+    description: 'Multipart upload session is not accepting parts',
+  })
+  @ApiGoneResponse({
+    description: 'Multipart upload session has expired',
+  })
+  @ApiServiceUnavailableResponse({
+    description: 'Object storage is temporarily unavailable',
+  })
+  createMultipartUploadPartUrl(
+    @CurrentUser() user: UserResponseDto,
+    @Param('sessionId', ParseUUIDPipe) uploadSessionId: string,
+    @Param('partNumber', ParseIntPipe) partNumber: number,
+  ): Promise<MultipartUploadPartUrlResponseDto> {
+    return this.filesService.createMultipartUploadPartUrl(
+      user.id,
+      uploadSessionId,
+      partNumber,
+    );
   }
 
   @Get()

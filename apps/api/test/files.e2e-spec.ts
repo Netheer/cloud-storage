@@ -975,4 +975,167 @@ describe('Files (e2e)', () => {
 
     expect(createMultipartUploadMock).toHaveBeenCalledTimes(1);
   });
+
+  it('creates a multipart part URL only for the session owner', async () => {
+    const initiationResponse = await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'part-url-file.bin',
+        mimeType: 'application/octet-stream',
+        totalSize: (11 * 1024 * 1024).toString(),
+        folderId: null,
+      })
+      .expect(201);
+
+    const initiationBody = initiationResponse.body as {
+      id?: unknown;
+    };
+
+    if (typeof initiationBody.id !== 'string') {
+      throw new Error('Multipart upload session ID is missing');
+    }
+
+    const session = await prisma.uploadSession.findUnique({
+      where: {
+        id: initiationBody.id,
+      },
+    });
+
+    if (!session?.multipartUploadId) {
+      throw new Error('Multipart upload metadata is missing');
+    }
+
+    const response = await request(app.getHttpServer())
+      .post(`/files/multipart/${session.id}/parts/2`)
+      .set(authorization(owner.accessToken))
+      .expect(201);
+
+    const body = response.body as {
+      partNumber?: unknown;
+      url?: unknown;
+      expiresAt?: unknown;
+    };
+
+    expect(body).toMatchObject({
+      partNumber: 2,
+      url: 'https://storage.test/upload-part',
+    });
+    expect(typeof body.expiresAt).toBe('string');
+
+    expect(createPresignedUploadPartUrlMock).toHaveBeenCalledWith({
+      objectKey: session.objectKey,
+      uploadId: session.multipartUploadId,
+      partNumber: 2,
+      expiresInSeconds: 900,
+    });
+
+    await request(app.getHttpServer())
+      .post(`/files/multipart/${session.id}/parts/1`)
+      .set(authorization(otherUser.accessToken))
+      .expect(404);
+
+    await request(app.getHttpServer())
+      .post(`/files/multipart/${session.id}/parts/0`)
+      .set(authorization(owner.accessToken))
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post(`/files/multipart/${session.id}/parts/3`)
+      .set(authorization(owner.accessToken))
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post(`/files/multipart/${session.id}/parts/not-a-number`)
+      .set(authorization(owner.accessToken))
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/files/multipart/not-a-uuid/parts/1')
+      .set(authorization(owner.accessToken))
+      .expect(400);
+
+    expect(createPresignedUploadPartUrlMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects expired multipart sessions when creating a part URL', async () => {
+    const initiationResponse = await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'expired-upload.bin',
+        totalSize: (11 * 1024 * 1024).toString(),
+      })
+      .expect(201);
+
+    const initiationBody = initiationResponse.body as {
+      id?: unknown;
+    };
+
+    if (typeof initiationBody.id !== 'string') {
+      throw new Error('Multipart upload session ID is missing');
+    }
+
+    await prisma.uploadSession.update({
+      where: {
+        id: initiationBody.id,
+      },
+      data: {
+        expiresAt: new Date(Date.now() - 1000),
+      },
+    });
+
+    await request(app.getHttpServer())
+      .post(`/files/multipart/${initiationBody.id}/parts/1`)
+      .set(authorization(owner.accessToken))
+      .expect(410);
+
+    const expiredSession = await prisma.uploadSession.findUnique({
+      where: {
+        id: initiationBody.id,
+      },
+      select: {
+        status: true,
+      },
+    });
+
+    expect(expiredSession?.status).toBe('EXPIRED');
+    expect(createPresignedUploadPartUrlMock).not.toHaveBeenCalled();
+
+    await request(app.getHttpServer())
+      .post(`/files/multipart/${initiationBody.id}/parts/1`)
+      .set(authorization(owner.accessToken))
+      .expect(410);
+  });
+
+  it('returns 503 when a multipart part URL cannot be created', async () => {
+    const initiationResponse = await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'part-url-storage-failure.bin',
+        totalSize: (11 * 1024 * 1024).toString(),
+      })
+      .expect(201);
+
+    const initiationBody = initiationResponse.body as {
+      id?: unknown;
+    };
+
+    if (typeof initiationBody.id !== 'string') {
+      throw new Error('Multipart upload session ID is missing');
+    }
+
+    createPresignedUploadPartUrlMock.mockRejectedValueOnce(
+      new Error('Storage is unavailable'),
+    );
+
+    await request(app.getHttpServer())
+      .post(`/files/multipart/${initiationBody.id}/parts/1`)
+      .set(authorization(owner.accessToken))
+      .expect(503);
+  });
 });

@@ -7,6 +7,7 @@ import {
   Logger,
   NotFoundException,
   ServiceUnavailableException,
+  GoneException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../database/prisma.service';
@@ -16,6 +17,7 @@ import {
 } from '../storage/object-storage.interface';
 import type { InitiateMultipartUploadDto } from './dto/initiate-multipart-upload.dto';
 import type { MultipartUploadSessionResponseDto } from './dto/multipart-upload-session-response.dto';
+import type { MultipartUploadPartUrlResponseDto } from './dto/multipart-upload-part-url-response.dto';
 import type { RenameFileDto } from './dto/rename-file.dto';
 import type { DownloadFileResponseDto } from './dto/download-file-response.dto';
 import type { FileResponseDto } from './dto/file-response.dto';
@@ -27,6 +29,7 @@ const MULTIPART_UPLOAD_PART_SIZE_BYTES = 8n * 1024n * 1024n;
 const MULTIPART_UPLOAD_MAX_SIZE_BYTES = 5n * 1024n * 1024n * 1024n;
 const MULTIPART_UPLOAD_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_MULTIPART_PARTS = 10_000;
+const MULTIPART_PART_URL_TTL_SECONDS = 15 * 60;
 
 const FILE_SELECT = {
   id: true,
@@ -283,6 +286,91 @@ export class FilesService {
       await this.markMultipartSessionFailed(session.id);
 
       throw error;
+    }
+  }
+
+  async createMultipartUploadPartUrl(
+    ownerId: string,
+    uploadSessionId: string,
+    partNumber: number,
+  ): Promise<MultipartUploadPartUrlResponseDto> {
+    const session = await this.prisma.uploadSession.findFirst({
+      where: {
+        id: uploadSessionId,
+        ownerId,
+      },
+      select: {
+        id: true,
+        status: true,
+        expiresAt: true,
+        totalParts: true,
+        objectKey: true,
+        multipartUploadId: true,
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Multipart upload session not found');
+    }
+
+    if (session.status === 'EXPIRED') {
+      throw new GoneException('Multipart upload session has expired');
+    }
+
+    if (session.status !== 'UPLOADING') {
+      throw new ConflictException(
+        'Multipart upload session is not accepting parts',
+      );
+    }
+
+    if (session.expiresAt.getTime() <= Date.now()) {
+      await this.prisma.uploadSession.updateMany({
+        where: {
+          id: session.id,
+          ownerId,
+          status: 'UPLOADING',
+        },
+        data: {
+          status: 'EXPIRED',
+        },
+      });
+
+      throw new GoneException('Multipart upload session has expired');
+    }
+
+    if (
+      !Number.isInteger(partNumber) ||
+      partNumber < 1 ||
+      partNumber > session.totalParts
+    ) {
+      throw new BadRequestException(
+        `Part number must be between 1 and ${session.totalParts}`,
+      );
+    }
+
+    if (!session.multipartUploadId) {
+      throw new InternalServerErrorException(
+        'Multipart upload session metadata is incomplete',
+      );
+    }
+
+    try {
+      const url = await this.objectStorage.createPresignedUploadPartUrl({
+        objectKey: session.objectKey,
+        uploadId: session.multipartUploadId,
+        partNumber,
+        expiresInSeconds: MULTIPART_PART_URL_TTL_SECONDS,
+      });
+
+      return {
+        partNumber,
+        url,
+        expiresAt: new Date(Date.now() + MULTIPART_PART_URL_TTL_SECONDS * 1000),
+      };
+    } catch {
+      throw new ServiceUnavailableException(
+        'Object storage is temporarily unavailable',
+      );
     }
   }
 
