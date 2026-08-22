@@ -69,6 +69,8 @@ export interface ObjectStorage {
 
   deleteObject(objectKey: string): Promise<void>;
 
+  getObjectMetadata(objectKey: string): Promise<ObjectMetadata | null>;
+
   createPresignedDownloadUrl(
     input: CreatePresignedDownloadUrlInput,
   ): Promise<string>;
@@ -88,6 +90,4 @@ export interface ObjectStorage {
   completeMultipartUpload(input: CompleteMultipartUploadInput): Promise<void>;
 
   abortMultipartUpload(input: AbortMultipartUploadInput): Promise<void>;
-
-  getObjectMetadata(objectKey: string): Promise<ObjectMetadata | null>;
 }
