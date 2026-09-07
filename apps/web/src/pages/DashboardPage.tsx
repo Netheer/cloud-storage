@@ -27,6 +27,11 @@ import {
 import { FolderNameDialog } from '../folders/FolderNameDialog';
 import { DeleteFolderDialog } from '../folders/DeleteFolderDialog';
 import { MoveFolderDialog } from '../folders/MoveFolderDialog';
+import {
+  isMultipartUploadAbortError,
+  requiresMultipartUpload,
+  uploadLargeFile,
+} from '../files/multipart-upload';
 
 type Breadcrumb = {
   id: string;
@@ -155,6 +160,8 @@ function DashboardPage() {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [files, setFiles] = useState<StoredFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] =
+  useState<number | null>(null);
   const [activeFileMenuId, setActiveFileMenuId] =
     useState<string | null>(null);
   const [downloadingFileId, setDownloadingFileId] =
@@ -178,6 +185,11 @@ function DashboardPage() {
   const [fileMoveError, setFileMoveError] =
     useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadAbortControllerRef =
+  useRef<AbortController | null>(null);
+
+const [isCancellingUpload, setIsCancellingUpload] =
+  useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [isCreateDialogOpen, setIsCreateDialogOpen] =
@@ -324,46 +336,100 @@ const handleOpenCreateDialog = () => {
   };
 
   const handleSelectFile = async (
-    event: ChangeEvent<HTMLInputElement>,
-  ) => {
-    const selectedFile = event.target.files?.[0];
+  event: ChangeEvent<HTMLInputElement>,
+) => {
+  const selectedFile = event.target.files?.[0];
 
-    event.target.value = '';
+  event.target.value = '';
 
-    if (!selectedFile) {
-      return;
-    }
+  if (!selectedFile) {
+    return;
+  }
 
-    setIsUploading(true);
+  const usesMultipartUpload =
+    requiresMultipartUpload(selectedFile);
+
+  setIsUploading(true);
+  setUploadProgress(
+    usesMultipartUpload ? 0 : null,
+  );
+  setError(null);
+
+  const uploadAbortController =
+  usesMultipartUpload
+    ? new AbortController()
+    : null;
+
+  uploadAbortControllerRef.current =
+    uploadAbortController;
+
+  try {
+    if (usesMultipartUpload) {
+  await uploadLargeFile(
+    authFetch,
+    selectedFile,
+    currentParentId,
+    {
+      signal:
+        uploadAbortController?.signal,
+      onProgress: ({ percent }) => {
+        setUploadProgress(percent);
+      },
+    },
+  );
+} else {
+  await uploadFile(
+    authFetch,
+    selectedFile,
+    currentParentId,
+  );
+}
+
+    setReloadVersion((version) => version + 1);
+  } catch (requestError) {
+    if (
+    isMultipartUploadAbortError(requestError)
+  ) {
     setError(null);
-
-    try {
-      await uploadFile(
-        authFetch,
-        selectedFile,
-        currentParentId,
+   } else if (
+      requestError instanceof ApiError &&
+      requestError.status === 413
+    ) {
+      setError(
+        'Файл слишком большой. Максимальный размер — 10 МБ.',
       );
-
-      setReloadVersion((version) => version + 1);
-    } catch (requestError) {
-      if (
-        requestError instanceof ApiError &&
-        requestError.status === 413
-      ) {
-        setError(
-          'Файл слишком большой. Максимальный размер — 10 МБ.',
-        );
-      } else {
-        setError(
-          requestError instanceof ApiError
-            ? requestError.message
-            : 'Не удалось загрузить файл',
-        );
-      }
-    } finally {
-      setIsUploading(false);
+    } else {
+      setError(
+        requestError instanceof ApiError
+          ? requestError.message
+          : 'Не удалось загрузить файл',
+      );
     }
-  };
+  } finally {
+    if (
+    uploadAbortControllerRef.current ===
+    uploadAbortController
+  ) {
+    uploadAbortControllerRef.current = null;
+  }
+
+  setIsUploading(false);
+  setIsCancellingUpload(false);
+  setUploadProgress(null);
+  }
+};
+
+  const handleCancelUpload = () => {
+  const controller =
+    uploadAbortControllerRef.current;
+
+  if (!controller || controller.signal.aborted) {
+    return;
+  }
+
+  setIsCancellingUpload(true);
+  controller.abort();
+};
 
   const handleDownloadFile = async (file: StoredFile) => {
     setActiveFileMenuId(null);
@@ -680,8 +746,25 @@ const handleMoveFile = async (
     disabled={isUploading}
   >
     <span aria-hidden="true">↑</span>
-    {isUploading ? 'Загружаем…' : 'Загрузить файл'}
+    {isUploading
+  ? uploadProgress === null
+    ? 'Загружаем…'
+    : `Загружаем… ${uploadProgress}%`
+  : 'Загрузить файл'}
   </button>
+
+  {isUploading && uploadProgress !== null && (
+  <button
+    className="secondary-button"
+    type="button"
+    onClick={handleCancelUpload}
+    disabled={isCancellingUpload}
+  >
+    {isCancellingUpload
+      ? 'Отменяем…'
+      : 'Отменить'}
+  </button>
+)}
 
   <button
     className="primary-button"

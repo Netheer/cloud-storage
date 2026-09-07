@@ -17,10 +17,59 @@ export interface FileDownload {
   expiresAt: string;
 }
 
-type AuthFetch = (
+export type AuthFetch = (
   path: string,
   init?: RequestInit,
 ) => Promise<Response>;
+
+export type MultipartUploadSessionStatus =
+  | 'CREATED'
+  | 'UPLOADING'
+  | 'COMPLETING'
+  | 'COMPLETED'
+  | 'ABORTED'
+  | 'EXPIRED'
+  | 'FAILED'
+  | 'ABORTING';
+
+export interface MultipartUploadSession {
+  id: string;
+  clientRequestId: string;
+  originalName: string;
+  mimeType: string | null;
+  folderId: string | null;
+  totalSize: string;
+  partSize: string;
+  totalParts: number;
+  status: MultipartUploadSessionStatus;
+  expiresAt: string;
+  fileId: string | null;
+}
+
+export interface MultipartUploadedPart {
+  partNumber: number;
+  etag: string;
+  size: string;
+}
+
+export interface MultipartUploadStatus
+  extends MultipartUploadSession {
+  uploadedParts: MultipartUploadedPart[];
+}
+
+export interface MultipartUploadPartUrl {
+  partNumber: number;
+  url: string;
+  expiresAt: string;
+}
+
+export interface InitiateMultipartUploadInput {
+  clientRequestId: string;
+  fileName: string;
+  mimeType?: string;
+  totalSize: string;
+  folderId: string | null;
+}
 
 async function getErrorMessage(
   response: Response,
@@ -166,4 +215,111 @@ export async function moveFile(
   );
 
   return readJson<StoredFile>(response);
+}
+
+export async function initiateMultipartUpload(
+  authFetch: AuthFetch,
+  input: InitiateMultipartUploadInput,
+  signal?: AbortSignal,
+): Promise<MultipartUploadSession> {
+  const response = await authFetch('/files/multipart', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      clientRequestId: input.clientRequestId,
+      fileName: input.fileName,
+      mimeType: input.mimeType,
+      totalSize: input.totalSize,
+      folderId: input.folderId,
+    }),
+    signal,
+  });
+
+  return readJson<MultipartUploadSession>(response);
+}
+
+export async function createMultipartUploadPartUrl(
+  authFetch: AuthFetch,
+  sessionId: string,
+  partNumber: number,
+  signal?: AbortSignal,
+): Promise<MultipartUploadPartUrl> {
+  const response = await authFetch(
+    `/files/multipart/${encodeURIComponent(sessionId)}/parts/${partNumber}`,
+    {
+      method: 'POST',
+      signal,
+    },
+  );
+
+  return readJson<MultipartUploadPartUrl>(response);
+}
+
+export async function getMultipartUploadStatus(
+  authFetch: AuthFetch,
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<MultipartUploadStatus> {
+  const response = await authFetch(
+    `/files/multipart/${encodeURIComponent(sessionId)}`,
+    {
+      signal,
+    },
+  );
+
+  return readJson<MultipartUploadStatus>(response);
+}
+
+export async function completeMultipartUpload(
+  authFetch: AuthFetch,
+  sessionId: string,
+): Promise<StoredFile> {
+  const response = await authFetch(
+    `/files/multipart/${encodeURIComponent(sessionId)}/complete`,
+    {
+      method: 'POST',
+    },
+  );
+
+  return readJson<StoredFile>(response);
+}
+
+export async function abortMultipartUpload(
+  authFetch: AuthFetch,
+  sessionId: string,
+): Promise<void> {
+  const response = await authFetch(
+    `/files/multipart/${encodeURIComponent(sessionId)}`,
+    {
+      method: 'DELETE',
+    },
+  );
+
+  if (!response.ok) {
+    throw new ApiError(
+      response.status,
+      await getErrorMessage(response),
+    );
+  }
+}
+
+export async function uploadMultipartPart(
+  url: string,
+  part: Blob,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(url, {
+    method: 'PUT',
+    body: part,
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new ApiError(
+      response.status,
+      await getErrorMessage(response),
+    );
+  }
 }
