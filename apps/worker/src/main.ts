@@ -5,9 +5,7 @@ import { AppModule } from './app.module';
 const logger = new Logger('WorkerBootstrap');
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.createApplicationContext(AppModule, {
-    bufferLogs: true,
-  });
+  const app = await NestFactory.createApplicationContext(AppModule);
 
   app.enableShutdownHooks();
   logger.log('Worker application started');
