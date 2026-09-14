@@ -28,6 +28,8 @@ import type { DownloadFileResponseDto } from './dto/download-file-response.dto';
 import type { FileResponseDto } from './dto/file-response.dto';
 import type { UploadFileDto } from './dto/upload-file.dto';
 import type { MoveFileDto } from './dto/move-file.dto';
+import { FileProcessingQueueService } from '../queue/file-processing-queue.service';
+import type { ProcessFileJob } from '../queue/file-processing.constants';
 
 const SIMPLE_UPLOAD_MAX_SIZE_BYTES = 10n * 1024n * 1024n;
 const MULTIPART_UPLOAD_PART_SIZE_BYTES = 8n * 1024n * 1024n;
@@ -126,6 +128,7 @@ export class FilesService {
     private readonly prisma: PrismaService,
     @Inject(OBJECT_STORAGE)
     private readonly objectStorage: ObjectStorage,
+    private readonly fileProcessingQueue: FileProcessingQueueService,
   ) {}
 
   async upload(
@@ -141,6 +144,7 @@ export class FilesService {
     }
 
     const objectKey = `users/${ownerId}/objects/${randomUUID()}`;
+
     const mimeType = file.mimetype.trim() || null;
 
     await this.objectStorage.putObject({
@@ -149,64 +153,78 @@ export class FilesService {
       contentType: mimeType ?? undefined,
     });
 
+    let created: {
+      file: FileRecord;
+      job: ProcessFileJob;
+    };
+
     try {
-      const createdFile = await this.prisma.$transaction(
-        async (transaction) => {
-          const fileMetadata = await transaction.file.create({
-            data: {
-              name: fileName,
-              ownerId,
-              folderId,
-              status: 'UPLOADING',
-            },
-            select: {
-              id: true,
-            },
-          });
+      created = await this.prisma.$transaction(async (transaction) => {
+        const fileMetadata = await transaction.file.create({
+          data: {
+            name: fileName,
+            ownerId,
+            folderId,
+            status: 'UPLOADING',
+          },
+          select: {
+            id: true,
+          },
+        });
 
-          const storedObject = await transaction.storedObject.create({
-            data: {
-              objectKey,
-              size: BigInt(file.size),
-              referenceCount: 1,
-            },
-            select: {
-              id: true,
-            },
-          });
+        const storedObject = await transaction.storedObject.create({
+          data: {
+            objectKey,
+            size: BigInt(file.size),
+            referenceCount: 1,
+          },
+          select: {
+            id: true,
+          },
+        });
 
-          const version = await transaction.fileVersion.create({
-            data: {
-              fileId: fileMetadata.id,
-              storedObjectId: storedObject.id,
-              versionNumber: 1,
-              originalName: fileName,
-              mimeType,
-              size: BigInt(file.size),
-            },
-            select: {
-              id: true,
-            },
-          });
+        const version = await transaction.fileVersion.create({
+          data: {
+            fileId: fileMetadata.id,
+            storedObjectId: storedObject.id,
+            versionNumber: 1,
+            originalName: fileName,
+            mimeType,
+            size: BigInt(file.size),
+          },
+          select: {
+            id: true,
+          },
+        });
 
-          return transaction.file.update({
-            where: {
-              id: fileMetadata.id,
-            },
-            data: {
-              currentVersionId: version.id,
-              status: 'READY',
-            },
-            select: FILE_SELECT,
-          });
-        },
-      );
+        const processingFile = await transaction.file.update({
+          where: {
+            id: fileMetadata.id,
+          },
+          data: {
+            currentVersionId: version.id,
+            status: 'PROCESSING',
+          },
+          select: FILE_SELECT,
+        });
 
-      return this.toResponseDto(createdFile);
+        return {
+          file: processingFile,
+          job: {
+            fileId: fileMetadata.id,
+            versionId: version.id,
+            storedObjectId: storedObject.id,
+          },
+        };
+      });
     } catch (error: unknown) {
       await this.removeOrphanedObject(objectKey);
       throw error;
     }
+
+    await this.fileProcessingQueue.enqueue(created.job);
+
+    return this.toResponseDto(created.file);
   }
 
   async initiateMultipartUpload(

@@ -28,7 +28,9 @@ export class FileProcessingQueueService implements OnModuleDestroy {
   }
 
   async enqueue(input: ProcessFileJob): Promise<string | undefined> {
-    const job = await this.queue.add(PROCESS_FILE_JOB_NAME, input);
+    const job = await this.queue.add(PROCESS_FILE_JOB_NAME, input, {
+      jobId: input.versionId,
+    });
 
     return job.id;
   }

@@ -67,6 +67,22 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
         `Job ${job?.id ?? 'unknown'} failed: ${error.message}`,
         error.stack,
       );
+
+      if (!job) {
+        return;
+      }
+
+      void this.handleFailedJob(job).catch((failureError: unknown) => {
+        const stack =
+          failureError instanceof Error
+            ? failureError.stack
+            : String(failureError);
+
+        this.logger.error(
+          `Failed to update file state after job ${job.id} failure`,
+          stack,
+        );
+      });
     });
 
     this.worker.on('error', (error) => {
@@ -128,68 +144,171 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
         `Stored object ${storedObject.id} already has SHA-256 ` +
           `${storedObject.sha256}`,
       );
-
-      return;
-    }
-
-    this.logger.log(
-      `Reading stored object ${storedObject.id}: ` +
-        `objectKey=${storedObject.objectKey}, ` +
-        `expectedSize=${storedObject.size.toString()}`,
-    );
-
-    const stream = await this.objectStorage.getObjectStream(
-      storedObject.objectKey,
-    );
-
-    const calculated = await this.calculateSha256(stream);
-
-    if (calculated.size !== storedObject.size) {
-      throw new Error(
-        `Stored object size mismatch: ` +
-          `expected=${storedObject.size.toString()}, ` +
-          `actual=${calculated.size.toString()}`,
+    } else {
+      this.logger.log(
+        `Reading stored object ${storedObject.id}: ` +
+          `objectKey=${storedObject.objectKey}, ` +
+          `expectedSize=${storedObject.size.toString()}`,
       );
-    }
 
-    const updateResult = await this.prisma.storedObject.updateMany({
-      where: {
-        id: storedObject.id,
-        sha256: null,
-      },
-      data: {
-        sha256: calculated.sha256,
-      },
-    });
+      const stream = await this.objectStorage.getObjectStream(
+        storedObject.objectKey,
+      );
 
-    if (updateResult.count === 0) {
-      const currentObject = await this.prisma.storedObject.findUnique({
-        where: {
-          id: storedObject.id,
-        },
-        select: {
-          sha256: true,
-        },
-      });
+      const calculated = await this.calculateSha256(stream);
 
-      if (currentObject?.sha256 !== calculated.sha256) {
+      if (calculated.size !== storedObject.size) {
         throw new Error(
-          `Stored object ${storedObject.id} SHA-256 changed concurrently`,
+          `Stored object size mismatch: ` +
+            `expected=${storedObject.size.toString()}, ` +
+            `actual=${calculated.size.toString()}`,
         );
       }
 
-      this.logger.log(
-        `SHA-256 for stored object ${storedObject.id} ` +
-          `was already stored by another worker`,
+      const updateResult = await this.prisma.storedObject.updateMany({
+        where: {
+          id: storedObject.id,
+          sha256: null,
+        },
+        data: {
+          sha256: calculated.sha256,
+        },
+      });
+
+      if (updateResult.count === 0) {
+        const currentObject = await this.prisma.storedObject.findUnique({
+          where: {
+            id: storedObject.id,
+          },
+          select: {
+            sha256: true,
+          },
+        });
+
+        if (currentObject?.sha256 !== calculated.sha256) {
+          throw new Error(
+            `Stored object ${storedObject.id} SHA-256 changed concurrently`,
+          );
+        }
+
+        this.logger.log(
+          `SHA-256 for stored object ${storedObject.id} ` +
+            `was already stored by another worker`,
+        );
+      } else {
+        this.logger.log(
+          `Calculated SHA-256 for stored object ${storedObject.id}: ` +
+            `${calculated.sha256}`,
+        );
+      }
+    }
+
+    await this.markFileReady(job.data.fileId, job.data.versionId);
+  }
+
+  private async handleFailedJob(job: Job<ProcessFileJob>): Promise<void> {
+    const maxAttempts = job.opts.attempts ?? 1;
+
+    if (job.attemptsMade < maxAttempts) {
+      this.logger.warn(
+        `Job ${job.id} failed attempt ` +
+          `${job.attemptsMade}/${maxAttempts}; ` +
+          `file remains PROCESSING`,
       );
 
       return;
     }
 
-    this.logger.log(
-      `Calculated SHA-256 for stored object ${storedObject.id}: ` +
-        `${calculated.sha256}`,
-    );
+    await this.markFileFailed(job.data.fileId, job.data.versionId);
+  }
+
+  private async markFileFailed(
+    fileId: string,
+    versionId: string,
+  ): Promise<void> {
+    const result = await this.prisma.file.updateMany({
+      where: {
+        id: fileId,
+        currentVersionId: versionId,
+        status: 'PROCESSING',
+      },
+      data: {
+        status: 'FAILED',
+      },
+    });
+
+    if (result.count > 0) {
+      this.logger.log(`File ${fileId} transitioned PROCESSING -> FAILED`);
+
+      return;
+    }
+
+    const file = await this.prisma.file.findUnique({
+      where: {
+        id: fileId,
+      },
+      select: {
+        currentVersionId: true,
+        status: true,
+      },
+    });
+
+    if (file?.currentVersionId === versionId && file.status === 'FAILED') {
+      this.logger.log(`File ${fileId} is already FAILED`);
+
+      return;
+    }
+
+    if (file?.currentVersionId === versionId && file.status === 'READY') {
+      this.logger.warn(
+        `File ${fileId} is already READY; ` +
+          `FAILED state will not overwrite it`,
+      );
+
+      return;
+    }
+
+    throw new Error(`File ${fileId} cannot transition to FAILED`);
+  }
+
+  private async markFileReady(
+    fileId: string,
+    versionId: string,
+  ): Promise<void> {
+    const result = await this.prisma.file.updateMany({
+      where: {
+        id: fileId,
+        currentVersionId: versionId,
+        status: 'PROCESSING',
+      },
+      data: {
+        status: 'READY',
+      },
+    });
+
+    if (result.count > 0) {
+      this.logger.log(`File ${fileId} transitioned PROCESSING -> READY`);
+
+      return;
+    }
+
+    const file = await this.prisma.file.findUnique({
+      where: {
+        id: fileId,
+      },
+      select: {
+        currentVersionId: true,
+        status: true,
+      },
+    });
+
+    if (file?.currentVersionId === versionId && file.status === 'READY') {
+      this.logger.log(`File ${fileId} is already READY`);
+
+      return;
+    }
+
+    throw new Error(`File ${fileId} cannot transition to READY`);
   }
 
   private async calculateSha256(stream: Readable): Promise<{

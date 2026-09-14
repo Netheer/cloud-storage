@@ -243,7 +243,6 @@ export type StoredObjectOrderByWithRelationInput = {
 export type StoredObjectWhereUniqueInput = Prisma.AtLeast<{
   id?: string
   objectKey?: string
-  sha256_size?: Prisma.StoredObjectSha256SizeCompoundUniqueInput
   AND?: Prisma.StoredObjectWhereInput | Prisma.StoredObjectWhereInput[]
   OR?: Prisma.StoredObjectWhereInput[]
   NOT?: Prisma.StoredObjectWhereInput | Prisma.StoredObjectWhereInput[]
@@ -252,7 +251,7 @@ export type StoredObjectWhereUniqueInput = Prisma.AtLeast<{
   referenceCount?: Prisma.IntFilter<"StoredObject"> | number
   createdAt?: Prisma.DateTimeFilter<"StoredObject"> | Date | string
   versions?: Prisma.FileVersionListRelationFilter
-}, "id" | "objectKey" | "sha256_size">
+}, "id" | "objectKey">
 
 export type StoredObjectOrderByWithAggregationInput = {
   id?: Prisma.SortOrder
@@ -350,11 +349,6 @@ export type StoredObjectUncheckedUpdateManyInput = {
 export type StoredObjectScalarRelationFilter = {
   is?: Prisma.StoredObjectWhereInput
   isNot?: Prisma.StoredObjectWhereInput
-}
-
-export type StoredObjectSha256SizeCompoundUniqueInput = {
-  sha256: string
-  size: bigint | number
 }
 
 export type StoredObjectCountOrderByAggregateInput = {
