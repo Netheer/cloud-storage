@@ -11,6 +11,7 @@ import {
   PROCESS_FILE_JOB_NAME,
   type ProcessFileJob,
 } from './file-processing.constants';
+import { PrismaService } from '../database/prisma.service';
 
 @Injectable()
 export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
@@ -21,7 +22,10 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
 
   private worker: Worker<ProcessFileJob> | null = null;
 
-  constructor(configService: ConfigService) {
+  constructor(
+    configService: ConfigService,
+    private readonly prisma: PrismaService,
+  ) {
     this.redisHost = configService.getOrThrow<string>('REDIS_HOST');
     this.redisPort = Number(configService.getOrThrow<string>('REDIS_PORT'));
 
@@ -33,9 +37,10 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
   onModuleInit(): void {
     this.worker = new Worker<ProcessFileJob>(
       FILE_PROCESSING_QUEUE_NAME,
-      (job: Job<ProcessFileJob>): Promise<void> => {
+
+      async (job: Job<ProcessFileJob>): Promise<void> => {
         if (job.name !== PROCESS_FILE_JOB_NAME) {
-          return Promise.reject(new Error(`Unsupported job name: ${job.name}`));
+          throw new Error(`Unsupported job name: ${job.name}`);
         }
 
         this.logger.log(
@@ -45,8 +50,47 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
             `storedObjectId=${job.data.storedObjectId}`,
         );
 
-        return Promise.resolve();
+        const version = await this.prisma.fileVersion.findUnique({
+          where: {
+            id: job.data.versionId,
+          },
+          select: {
+            id: true,
+            fileId: true,
+            storedObjectId: true,
+            storedObject: {
+              select: {
+                id: true,
+                objectKey: true,
+                size: true,
+                sha256: true,
+              },
+            },
+          },
+        });
+
+        if (!version) {
+          throw new Error(`File version ${job.data.versionId} was not found`);
+        }
+
+        if (version.fileId !== job.data.fileId) {
+          throw new Error(`Job fileId does not match version ${version.id}`);
+        }
+
+        if (version.storedObjectId !== job.data.storedObjectId) {
+          throw new Error(
+            `Job storedObjectId does not match version ${version.id}`,
+          );
+        }
+
+        this.logger.log(
+          `Resolved stored object ${version.storedObject.id}: ` +
+            `objectKey=${version.storedObject.objectKey}, ` +
+            `size=${version.storedObject.size.toString()}, ` +
+            `sha256=${version.storedObject.sha256 ?? 'null'}`,
+        );
       },
+
       {
         connection: {
           host: this.redisHost,

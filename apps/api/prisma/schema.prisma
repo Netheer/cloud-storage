@@ -4,6 +4,12 @@ generator client {
   moduleFormat = "cjs"
 }
 
+generator workerClient {
+  provider     = "prisma-client"
+  output       = "../../worker/src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
 datasource db {
   provider = "postgresql"
 }
