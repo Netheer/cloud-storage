@@ -19,6 +19,12 @@ import {
   PROCESS_FILE_JOB_NAME,
   type ProcessFileJob,
 } from './file-processing.constants';
+import sharp from 'sharp';
+const SUPPORTED_IMAGE_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
 
 @Injectable()
 export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
@@ -112,6 +118,12 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
         id: true,
         fileId: true,
         storedObjectId: true,
+
+        mimeType: true,
+        imageWidth: true,
+        imageHeight: true,
+        imageFormat: true,
+
         storedObject: {
           select: {
             id: true,
@@ -203,6 +215,15 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
       }
     }
 
+    await this.processImageMetadata({
+      versionId: version.id,
+      objectKey: storedObject.objectKey,
+      mimeType: version.mimeType,
+      imageWidth: version.imageWidth,
+      imageHeight: version.imageHeight,
+      imageFormat: version.imageFormat,
+    });
+
     await this.markFileReady(job.data.fileId, job.data.versionId);
   }
 
@@ -269,6 +290,122 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
     }
 
     throw new Error(`File ${fileId} cannot transition to FAILED`);
+  }
+
+  private async processImageMetadata(input: {
+    versionId: string;
+    objectKey: string;
+    mimeType: string | null;
+    imageWidth: number | null;
+    imageHeight: number | null;
+    imageFormat: string | null;
+  }): Promise<void> {
+    const normalizedMimeType = input.mimeType?.toLowerCase() ?? null;
+
+    if (
+      !normalizedMimeType ||
+      !SUPPORTED_IMAGE_MIME_TYPES.has(normalizedMimeType)
+    ) {
+      this.logger.log(
+        `Skipping image metadata for version ${input.versionId}: ` +
+          `unsupported MIME type ${normalizedMimeType ?? 'null'}`,
+      );
+
+      return;
+    }
+
+    if (
+      input.imageWidth !== null &&
+      input.imageHeight !== null &&
+      input.imageFormat !== null
+    ) {
+      this.logger.log(
+        `Image metadata for version ${input.versionId} is already stored: ` +
+          `${input.imageWidth}x${input.imageHeight}, ${input.imageFormat}`,
+      );
+
+      return;
+    }
+
+    this.logger.log(
+      `Reading image metadata for version ${input.versionId}: ` +
+        `objectKey=${input.objectKey}`,
+    );
+
+    const stream = await this.objectStorage.getObjectStream(input.objectKey);
+
+    const image = sharp();
+
+    stream.pipe(image);
+
+    try {
+      const metadata = await image.metadata();
+
+      const width = metadata.autoOrient?.width ?? metadata.width;
+
+      const height = metadata.autoOrient?.height ?? metadata.height;
+
+      const format = metadata.format;
+
+      if (width === undefined || height === undefined || format === undefined) {
+        throw new Error(
+          `Image metadata is incomplete for version ${input.versionId}`,
+        );
+      }
+
+      const updateResult = await this.prisma.fileVersion.updateMany({
+        where: {
+          id: input.versionId,
+          imageWidth: null,
+          imageHeight: null,
+          imageFormat: null,
+        },
+        data: {
+          imageWidth: width,
+          imageHeight: height,
+          imageFormat: format,
+        },
+      });
+
+      if (updateResult.count === 0) {
+        const currentVersion = await this.prisma.fileVersion.findUnique({
+          where: {
+            id: input.versionId,
+          },
+          select: {
+            imageWidth: true,
+            imageHeight: true,
+            imageFormat: true,
+          },
+        });
+
+        if (
+          currentVersion?.imageWidth !== width ||
+          currentVersion.imageHeight !== height ||
+          currentVersion.imageFormat !== format
+        ) {
+          throw new Error(
+            `Image metadata conflict for version ${input.versionId}`,
+          );
+        }
+
+        this.logger.log(
+          `Image metadata for version ${input.versionId} ` +
+            `was already stored by another worker`,
+        );
+
+        return;
+      }
+
+      this.logger.log(
+        `Stored image metadata for version ${input.versionId}: ` +
+          `${width}x${height}, ${format}`,
+      );
+    } finally {
+      stream.unpipe(image);
+      stream.destroy();
+      image.destroy();
+    }
   }
 
   private async markFileReady(

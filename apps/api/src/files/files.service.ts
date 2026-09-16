@@ -1430,10 +1430,28 @@ export class FilesService {
       where: {
         id: fileId,
         ownerId,
-        status: 'READY',
+        status: {
+          in: ['PROCESSING', 'READY', 'FAILED'],
+        },
         deletedAt: null,
       },
-      select: FILE_SELECT,
+      select: {
+        id: true,
+        name: true,
+        ownerId: true,
+        folderId: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        currentVersion: {
+          select: {
+            id: true,
+            storedObjectId: true,
+            mimeType: true,
+            size: true,
+          },
+        },
+      },
     });
 
     if (!file) {
@@ -1442,19 +1460,33 @@ export class FilesService {
       );
     }
 
+    if (!file.currentVersion) {
+      throw new InternalServerErrorException(
+        'Completed multipart file version is missing',
+      );
+    }
+
+    if (file.status === 'PROCESSING') {
+      await this.fileProcessingQueue.enqueue({
+        fileId: file.id,
+        versionId: file.currentVersion.id,
+        storedObjectId: file.currentVersion.storedObjectId,
+      });
+    }
+
     return this.toResponseDto(file);
   }
 
   private async finalizeMultipartUploadMetadata(
     input: FinalizeMultipartUploadInput,
   ): Promise<FileResponseDto> {
-    return this.prisma.$transaction(async (transaction) => {
+    const fileId = await this.prisma.$transaction(async (transaction) => {
       const lockedSessions = await transaction.$queryRaw<Array<{ id: string }>>`
-        SELECT "id"
-        FROM "UploadSession"
-        WHERE "id" = ${input.uploadSessionId}::uuid
-        FOR UPDATE
-      `;
+          SELECT "id"
+          FROM "UploadSession"
+          WHERE "id" = ${input.uploadSessionId}::uuid
+          FOR UPDATE
+        `;
 
       if (lockedSessions.length === 0) {
         throw new NotFoundException('Multipart upload session not found');
@@ -1481,23 +1513,7 @@ export class FilesService {
           );
         }
 
-        const completedFile = await transaction.file.findFirst({
-          where: {
-            id: lockedSession.fileId,
-            ownerId: input.ownerId,
-            status: 'READY',
-            deletedAt: null,
-          },
-          select: FILE_SELECT,
-        });
-
-        if (!completedFile) {
-          throw new InternalServerErrorException(
-            'Completed multipart file metadata is missing',
-          );
-        }
-
-        return this.toResponseDto(completedFile);
+        return lockedSession.fileId;
       }
 
       if (lockedSession.status !== 'COMPLETING') {
@@ -1543,15 +1559,14 @@ export class FilesService {
         },
       });
 
-      const completedFile = await transaction.file.update({
+      await transaction.file.update({
         where: {
           id: fileMetadata.id,
         },
         data: {
           currentVersionId: version.id,
-          status: 'READY',
+          status: 'PROCESSING',
         },
-        select: FILE_SELECT,
       });
 
       await transaction.uploadSession.update({
@@ -1559,12 +1574,14 @@ export class FilesService {
           id: input.uploadSessionId,
         },
         data: {
-          fileId: completedFile.id,
+          fileId: fileMetadata.id,
           status: 'COMPLETED',
         },
       });
 
-      return this.toResponseDto(completedFile);
+      return fileMetadata.id;
     });
+
+    return this.getCompletedMultipartFile(input.ownerId, fileId);
   }
 }

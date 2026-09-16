@@ -94,6 +94,16 @@ model FileVersion {
   originalName   String
   mimeType       String?
   size           BigInt
+
+  imageWidth     Int?
+  imageHeight    Int?
+  imageFormat    String?
+
+  previewObjectKey String? @unique
+  previewMimeType  String?
+  previewWidth     Int?
+  previewHeight    Int?
+
   createdAt      DateTime @default(now())
 
   file         File         @relation("FileVersions", fields: [fileId], references: [id], onDelete: Cascade)
