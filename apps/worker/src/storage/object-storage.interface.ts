@@ -1,7 +1,15 @@
 import type { Readable } from 'node:stream';
 
+export type PutObjectInput = {
+  objectKey: string;
+  body: Uint8Array;
+  contentType: string;
+};
+
 export const OBJECT_STORAGE = Symbol('OBJECT_STORAGE');
 
 export interface ObjectStorage {
   getObjectStream(objectKey: string): Promise<Readable>;
+
+  putObject(input: PutObjectInput): Promise<void>;
 }

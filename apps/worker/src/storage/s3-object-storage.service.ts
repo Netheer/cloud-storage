@@ -1,8 +1,12 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  GetObjectCommand,
+  S3Client,
+  PutObjectCommand,
+} from '@aws-sdk/client-s3';
 import { Readable } from 'node:stream';
-import type { ObjectStorage } from './object-storage.interface';
+import type { ObjectStorage, PutObjectInput } from './object-storage.interface';
 
 @Injectable()
 export class S3ObjectStorageService implements ObjectStorage, OnModuleDestroy {
@@ -51,6 +55,18 @@ export class S3ObjectStorageService implements ObjectStorage, OnModuleDestroy {
     }
 
     return result.Body;
+  }
+
+  async putObject(input: PutObjectInput): Promise<void> {
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: input.objectKey,
+        Body: input.body,
+        ContentLength: input.body.byteLength,
+        ContentType: input.contentType,
+      }),
+    );
   }
 
   onModuleDestroy(): void {

@@ -124,6 +124,11 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
         imageHeight: true,
         imageFormat: true,
 
+        previewObjectKey: true,
+        previewMimeType: true,
+        previewWidth: true,
+        previewHeight: true,
+
         storedObject: {
           select: {
             id: true,
@@ -222,6 +227,16 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
       imageWidth: version.imageWidth,
       imageHeight: version.imageHeight,
       imageFormat: version.imageFormat,
+    });
+
+    await this.processImagePreview({
+      versionId: version.id,
+      objectKey: storedObject.objectKey,
+      mimeType: version.mimeType,
+      previewObjectKey: version.previewObjectKey,
+      previewMimeType: version.previewMimeType,
+      previewWidth: version.previewWidth,
+      previewHeight: version.previewHeight,
     });
 
     await this.markFileReady(job.data.fileId, job.data.versionId);
@@ -405,6 +420,101 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
       stream.unpipe(image);
       stream.destroy();
       image.destroy();
+    }
+  }
+
+  private async processImagePreview(input: {
+    versionId: string;
+    objectKey: string;
+    mimeType: string | null;
+    previewObjectKey: string | null;
+    previewMimeType: string | null;
+    previewWidth: number | null;
+    previewHeight: number | null;
+  }): Promise<void> {
+    const normalizedMimeType = input.mimeType?.toLowerCase() ?? null;
+
+    if (
+      !normalizedMimeType ||
+      !SUPPORTED_IMAGE_MIME_TYPES.has(normalizedMimeType)
+    ) {
+      this.logger.log(
+        `Skipping image preview for version ${input.versionId}: ` +
+          `unsupported MIME type ${normalizedMimeType ?? 'null'}`,
+      );
+
+      return;
+    }
+
+    if (
+      input.previewObjectKey !== null &&
+      input.previewMimeType !== null &&
+      input.previewWidth !== null &&
+      input.previewHeight !== null
+    ) {
+      this.logger.log(
+        `Image preview for version ${input.versionId} is already stored: ` +
+          `${input.previewWidth}x${input.previewHeight}`,
+      );
+
+      return;
+    }
+
+    const previewObjectKey = `${input.objectKey}.preview.${input.versionId}.webp`;
+
+    this.logger.log(
+      `Generating image preview for version ${input.versionId}: ` +
+        `objectKey=${previewObjectKey}`,
+    );
+
+    const stream = await this.objectStorage.getObjectStream(input.objectKey);
+
+    const transformer = sharp()
+      .autoOrient()
+      .resize({
+        width: 512,
+        height: 512,
+        fit: 'inside',
+        withoutEnlargement: true,
+      })
+      .webp({
+        quality: 80,
+      });
+
+    stream.pipe(transformer);
+
+    try {
+      const { data, info } = await transformer.toBuffer({
+        resolveWithObject: true,
+      });
+
+      await this.objectStorage.putObject({
+        objectKey: previewObjectKey,
+        body: data,
+        contentType: 'image/webp',
+      });
+
+      await this.prisma.fileVersion.update({
+        where: {
+          id: input.versionId,
+        },
+        data: {
+          previewObjectKey,
+          previewMimeType: 'image/webp',
+          previewWidth: info.width,
+          previewHeight: info.height,
+        },
+      });
+
+      this.logger.log(
+        `Stored image preview for version ${input.versionId}: ` +
+          `${info.width}x${info.height}, webp, ` +
+          `objectKey=${previewObjectKey}`,
+      );
+    } finally {
+      stream.unpipe(transformer);
+      stream.destroy();
+      transformer.destroy();
     }
   }
 
