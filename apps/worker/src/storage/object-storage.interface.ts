@@ -13,3 +13,10 @@ export interface ObjectStorage {
 
   putObject(input: PutObjectInput): Promise<void>;
 }
+
+export class ObjectNotFoundError extends Error {
+  constructor(objectKey: string) {
+    super(`Object ${objectKey} was not found in object storage`);
+    this.name = 'ObjectNotFoundError';
+  }
+}

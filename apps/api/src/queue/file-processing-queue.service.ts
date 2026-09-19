@@ -30,6 +30,11 @@ export class FileProcessingQueueService implements OnModuleDestroy {
   async enqueue(input: ProcessFileJob): Promise<string | undefined> {
     const job = await this.queue.add(PROCESS_FILE_JOB_NAME, input, {
       jobId: input.versionId,
+      attempts: 4,
+      backoff: {
+        type: 'exponential',
+        delay: 2000,
+      },
     });
 
     return job.id;

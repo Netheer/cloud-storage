@@ -6,12 +6,13 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Job, Worker } from 'bullmq';
+import { Job, Worker, UnrecoverableError } from 'bullmq';
 import { createHash } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { PrismaService } from '../database/prisma.service';
 import {
   OBJECT_STORAGE,
+  ObjectNotFoundError,
   type ObjectStorage,
 } from '../storage/object-storage.interface';
 import {
@@ -25,6 +26,13 @@ const SUPPORTED_IMAGE_MIME_TYPES = new Set([
   'image/png',
   'image/webp',
 ]);
+
+class PermanentFileProcessingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PermanentFileProcessingError';
+  }
+}
 
 @Injectable()
 export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
@@ -54,7 +62,22 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
     this.worker = new Worker<ProcessFileJob>(
       FILE_PROCESSING_QUEUE_NAME,
       async (job: Job<ProcessFileJob>): Promise<void> => {
-        await this.processJob(job);
+        if (job.name !== PROCESS_FILE_JOB_NAME) {
+          throw new UnrecoverableError(`Unsupported job name: ${job.name}`);
+        }
+
+        try {
+          await this.processJob(job);
+        } catch (error: unknown) {
+          if (
+            error instanceof PermanentFileProcessingError ||
+            error instanceof ObjectNotFoundError
+          ) {
+            throw new UnrecoverableError(error.message);
+          }
+
+          throw error;
+        }
       },
       {
         connection: {
@@ -78,7 +101,7 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      void this.handleFailedJob(job).catch((failureError: unknown) => {
+      void this.handleFailedJob(job, error).catch((failureError: unknown) => {
         const stack =
           failureError instanceof Error
             ? failureError.stack
@@ -99,10 +122,6 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
   }
 
   private async processJob(job: Job<ProcessFileJob>): Promise<void> {
-    if (job.name !== PROCESS_FILE_JOB_NAME) {
-      throw new Error(`Unsupported job name: ${job.name}`);
-    }
-
     this.logger.log(
       `Processing job ${job.id}: ` +
         `fileId=${job.data.fileId}, ` +
@@ -141,15 +160,19 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
     });
 
     if (!version) {
-      throw new Error(`File version ${job.data.versionId} was not found`);
+      throw new PermanentFileProcessingError(
+        `File version ${job.data.versionId} was not found`,
+      );
     }
 
     if (version.fileId !== job.data.fileId) {
-      throw new Error(`Job fileId does not match version ${version.id}`);
+      throw new PermanentFileProcessingError(
+        `Job fileId does not match version ${version.id}`,
+      );
     }
 
     if (version.storedObjectId !== job.data.storedObjectId) {
-      throw new Error(
+      throw new PermanentFileProcessingError(
         `Job storedObjectId does not match version ${version.id}`,
       );
     }
@@ -175,7 +198,7 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
       const calculated = await this.calculateSha256(stream);
 
       if (calculated.size !== storedObject.size) {
-        throw new Error(
+        throw new PermanentFileProcessingError(
           `Stored object size mismatch: ` +
             `expected=${storedObject.size.toString()}, ` +
             `actual=${calculated.size.toString()}`,
@@ -203,7 +226,7 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
         });
 
         if (currentObject?.sha256 !== calculated.sha256) {
-          throw new Error(
+          throw new PermanentFileProcessingError(
             `Stored object ${storedObject.id} SHA-256 changed concurrently`,
           );
         }
@@ -242,7 +265,21 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
     await this.markFileReady(job.data.fileId, job.data.versionId);
   }
 
-  private async handleFailedJob(job: Job<ProcessFileJob>): Promise<void> {
+  private async handleFailedJob(
+    job: Job<ProcessFileJob>,
+    error: Error,
+  ): Promise<void> {
+    if (error instanceof UnrecoverableError) {
+      this.logger.warn(
+        `Job ${job.id} failed with an unrecoverable error; ` +
+          `file will be marked FAILED`,
+      );
+
+      await this.markFileFailed(job.data.fileId, job.data.versionId);
+
+      return;
+    }
+
     const maxAttempts = job.opts.attempts ?? 1;
 
     if (job.attemptsMade < maxAttempts) {
@@ -363,11 +400,10 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
       const format = metadata.format;
 
       if (width === undefined || height === undefined || format === undefined) {
-        throw new Error(
+        throw new PermanentFileProcessingError(
           `Image metadata is incomplete for version ${input.versionId}`,
         );
       }
-
       const updateResult = await this.prisma.fileVersion.updateMany({
         where: {
           id: input.versionId,
@@ -399,7 +435,7 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
           currentVersion.imageHeight !== height ||
           currentVersion.imageFormat !== format
         ) {
-          throw new Error(
+          throw new PermanentFileProcessingError(
             `Image metadata conflict for version ${input.versionId}`,
           );
         }
@@ -555,7 +591,9 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    throw new Error(`File ${fileId} cannot transition to READY`);
+    throw new PermanentFileProcessingError(
+      `File ${fileId} cannot transition to READY`,
+    );
   }
 
   private async calculateSha256(stream: Readable): Promise<{

@@ -2,11 +2,17 @@ import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   GetObjectCommand,
-  S3Client,
+  NoSuchKey,
   PutObjectCommand,
+  S3Client,
+  S3ServiceException,
 } from '@aws-sdk/client-s3';
 import { Readable } from 'node:stream';
-import type { ObjectStorage, PutObjectInput } from './object-storage.interface';
+import {
+  ObjectNotFoundError,
+  type ObjectStorage,
+  type PutObjectInput,
+} from './object-storage.interface';
 
 @Injectable()
 export class S3ObjectStorageService implements ObjectStorage, OnModuleDestroy {
@@ -39,22 +45,33 @@ export class S3ObjectStorageService implements ObjectStorage, OnModuleDestroy {
   }
 
   async getObjectStream(objectKey: string): Promise<Readable> {
-    const result = await this.client.send(
-      new GetObjectCommand({
-        Bucket: this.bucket,
-        Key: objectKey,
-      }),
-    );
+    try {
+      const result = await this.client.send(
+        new GetObjectCommand({
+          Bucket: this.bucket,
+          Key: objectKey,
+        }),
+      );
 
-    if (!result.Body) {
-      throw new Error('Object storage returned an empty object body');
+      if (!result.Body) {
+        throw new Error('Object storage returned an empty object body');
+      }
+
+      if (!(result.Body instanceof Readable)) {
+        throw new Error('Object storage returned an unsupported object body');
+      }
+
+      return result.Body;
+    } catch (error: unknown) {
+      if (
+        error instanceof NoSuchKey ||
+        (error instanceof S3ServiceException && error.name === 'NoSuchKey')
+      ) {
+        throw new ObjectNotFoundError(objectKey);
+      }
+
+      throw error;
     }
-
-    if (!(result.Body instanceof Readable)) {
-      throw new Error('Object storage returned an unsupported object body');
-    }
-
-    return result.Body;
   }
 
   async putObject(input: PutObjectInput): Promise<void> {
