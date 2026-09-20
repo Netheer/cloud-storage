@@ -48,6 +48,7 @@ import { MoveFileDto } from './dto/move-file.dto';
 import { InitiateMultipartUploadDto } from './dto/initiate-multipart-upload.dto';
 import { MultipartUploadSessionResponseDto } from './dto/multipart-upload-session-response.dto';
 import { MultipartUploadPartUrlResponseDto } from './dto/multipart-upload-part-url-response.dto';
+import { PreviewFileResponseDto } from './dto/preview-file-response.dto';
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 
@@ -274,6 +275,35 @@ export class FilesController {
     @Param('id', ParseUUIDPipe) fileId: string,
   ): Promise<DownloadFileResponseDto> {
     return this.filesService.createDownloadUrl(user.id, fileId);
+  }
+
+  @Get(':id/preview')
+  @ApiOperation({
+    summary: 'Create a temporary file preview URL',
+  })
+  @ApiParam({
+    name: 'id',
+    format: 'uuid',
+    description: 'File ID',
+  })
+  @ApiOkResponse({
+    description: 'Temporary preview URL created successfully',
+    type: PreviewFileResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid file ID',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Access token is missing or invalid',
+  })
+  @ApiNotFoundResponse({
+    description: 'File or preview not found',
+  })
+  createPreviewUrl(
+    @CurrentUser() user: UserResponseDto,
+    @Param('id', ParseUUIDPipe) fileId: string,
+  ): Promise<PreviewFileResponseDto> {
+    return this.filesService.createPreviewUrl(user.id, fileId);
   }
 
   @Post('multipart/:sessionId/complete')

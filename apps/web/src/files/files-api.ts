@@ -17,6 +17,14 @@ export interface FileDownload {
   expiresAt: string;
 }
 
+export interface FilePreview {
+  url: string;
+  expiresAt: string;
+  mimeType: string;
+  width: number;
+  height: number;
+}
+
 export type AuthFetch = (
   path: string,
   init?: RequestInit,
@@ -158,6 +166,17 @@ export async function createFileDownload(
   );
 
   return readJson<FileDownload>(response);
+}
+
+export async function createFilePreview(
+  authFetch: AuthFetch,
+  fileId: string,
+): Promise<FilePreview> {
+  const response = await authFetch(
+    `/files/${encodeURIComponent(fileId)}/preview`,
+  );
+
+  return readJson<FilePreview>(response);
 }
 
 export async function renameFile(

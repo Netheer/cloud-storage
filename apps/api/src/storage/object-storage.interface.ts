@@ -11,6 +11,7 @@ export interface CreatePresignedDownloadUrlInput {
   downloadFileName: string;
   contentType?: string;
   expiresInSeconds: number;
+  contentDisposition?: 'attachment' | 'inline';
 }
 
 export interface CreateMultipartUploadInput {

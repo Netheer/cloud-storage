@@ -4,6 +4,7 @@ import {
   useRef,
   type ChangeEvent,
 } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import '../App.css';
 import { ApiError } from '../auth/auth-api';
 import { useAuth } from '../auth/useAuth';
@@ -20,6 +21,7 @@ import {
   type StoredFile,
   uploadFile,
   createFileDownload,
+  createFilePreview,
   renameFile,
   deleteFile,
   moveFile,
@@ -132,6 +134,18 @@ function formatFileDate(value: string): string {
   }).format(new Date(value));
 }
 
+function fileStatusLabel(status: string): string | null {
+  if (status === 'PROCESSING') {
+    return 'Обрабатывается…';
+  }
+
+  if (status === 'FAILED') {
+    return 'Ошибка обработки';
+  }
+
+  return null;
+}
+
 function folderCountLabel(count: number): string {
   const lastTwoDigits = count % 100;
   const lastDigit = count % 10;
@@ -153,12 +167,17 @@ function folderCountLabel(count: number): string {
 
 function DashboardPage() {
   const { user, logout, authFetch } = useAuth();
+  const location = useLocation();
+const navigate = useNavigate();
 
   const [breadcrumbs, setBreadcrumbs] = useState<
     Breadcrumb[]
   >([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [files, setFiles] = useState<StoredFile[]>([]);
+  const [filePreviewUrls, setFilePreviewUrls] = useState<
+  Record<string, string>
+>({});
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] =
   useState<number | null>(null);
@@ -214,6 +233,72 @@ const [isCancellingUpload, setIsCancellingUpload] =
   const currentFolder =
     breadcrumbs[breadcrumbs.length - 1] ?? null;
   const currentParentId = currentFolder?.id ?? null;
+  useEffect(() => {
+  let active = true;
+
+  const restoreBreadcrumbs = async () => {
+    if (location.pathname === '/') {
+      setBreadcrumbs([]);
+      return;
+    }
+
+    const prefix = '/folders/';
+
+    if (!location.pathname.startsWith(prefix)) {
+      return;
+    }
+
+    const folderIds = location.pathname
+      .slice(prefix.length)
+      .split('/')
+      .filter(Boolean);
+
+    const restoredBreadcrumbs: Breadcrumb[] = [];
+    let parentId: string | null = null;
+
+    for (const folderId of folderIds) {
+      const childFolders = await listFolders(
+        authFetch,
+        parentId,
+      );
+
+      const folder = childFolders.find(
+        (candidate) => candidate.id === folderId,
+      );
+
+      if (!folder) {
+        if (active) {
+          setBreadcrumbs([]);
+          navigate('/', { replace: true });
+        }
+
+        return;
+      }
+
+      restoredBreadcrumbs.push({
+        id: folder.id,
+        name: folder.name,
+      });
+
+      parentId = folder.id;
+    }
+
+    if (active) {
+      setBreadcrumbs(restoredBreadcrumbs);
+    }
+  };
+
+  void restoreBreadcrumbs().catch(() => {
+    if (active) {
+      setBreadcrumbs([]);
+      navigate('/', { replace: true });
+    }
+  });
+
+  return () => {
+    active = false;
+  };
+}, [authFetch, location.pathname, navigate]);
   const [folderToMove, setFolderToMove] =
     useState<Folder | null>(null);
   const [isMoving, setIsMoving] = useState(false);
@@ -262,6 +347,58 @@ const [isCancellingUpload, setIsCancellingUpload] =
     };
   }, [authFetch, currentParentId, reloadVersion]);
 
+  useEffect(() => {
+  let active = true;
+
+  const imageFiles = files.filter((file) =>
+    file.mimeType?.toLowerCase().startsWith('image/'),
+  );
+
+  if (imageFiles.length === 0) {
+    setFilePreviewUrls({});
+
+    return () => {
+      active = false;
+    };
+  }
+
+  void Promise.all(
+    imageFiles.map(async (file) => {
+      try {
+        const preview = await createFilePreview(
+          authFetch,
+          file.id,
+        );
+
+        return {
+          fileId: file.id,
+          url: preview.url,
+        };
+      } catch {
+        return null;
+      }
+    }),
+  ).then((previews) => {
+    if (!active) {
+      return;
+    }
+
+    const nextPreviewUrls: Record<string, string> = {};
+
+    for (const preview of previews) {
+      if (preview) {
+        nextPreviewUrls[preview.fileId] = preview.url;
+      }
+    }
+
+    setFilePreviewUrls(nextPreviewUrls);
+  });
+
+  return () => {
+    active = false;
+  };
+}, [authFetch, files]);
+
   const handleCreateFolder = async (name: string) => {
     setIsCreating(true);
     setDialogError(null);
@@ -286,6 +423,24 @@ const [isCancellingUpload, setIsCancellingUpload] =
   setRenameError(null);
   setFolderToRename(folder);
 };
+
+useEffect(() => {
+  const hasProcessingFiles = files.some(
+    (file) => file.status === 'PROCESSING',
+  );
+
+  if (!hasProcessingFiles) {
+    return;
+  }
+
+  const timeoutId = window.setTimeout(() => {
+    setReloadVersion((version) => version + 1);
+  }, 1500);
+
+  return () => {
+    window.clearTimeout(timeoutId);
+  };
+}, [files]);
 
 const handleRenameFolder = async (name: string) => {
   if (!folderToRename) {
@@ -316,24 +471,46 @@ const handleOpenCreateDialog = () => {
 };
 
   const handleOpenFolder = (folder: Folder) => {
-    setBreadcrumbs((current) => [
-      ...current,
-      {
-        id: folder.id,
-        name: folder.name,
-      },
-    ]);
-  };
+  const nextBreadcrumbs = [
+    ...breadcrumbs,
+    {
+      id: folder.id,
+      name: folder.name,
+    },
+  ];
 
-  const handleOpenRoot = () => {
-    setBreadcrumbs([]);
-  };
+  setBreadcrumbs(nextBreadcrumbs);
 
-  const handleOpenBreadcrumb = (index: number) => {
-    setBreadcrumbs((current) =>
-      current.slice(0, index + 1),
-    );
-  };
+  navigate(
+    `/folders/${nextBreadcrumbs
+      .map((breadcrumb) =>
+        encodeURIComponent(breadcrumb.id),
+      )
+      .join('/')}`,
+  );
+};
+
+const handleOpenRoot = () => {
+  setBreadcrumbs([]);
+  navigate('/');
+};
+
+const handleOpenBreadcrumb = (index: number) => {
+  const nextBreadcrumbs = breadcrumbs.slice(
+    0,
+    index + 1,
+  );
+
+  setBreadcrumbs(nextBreadcrumbs);
+
+  navigate(
+    `/folders/${nextBreadcrumbs
+      .map((breadcrumb) =>
+        encodeURIComponent(breadcrumb.id),
+      )
+      .join('/')}`,
+  );
+};
 
   const handleSelectFile = async (
   event: ChangeEvent<HTMLInputElement>,
@@ -364,28 +541,39 @@ const handleOpenCreateDialog = () => {
     uploadAbortController;
 
   try {
-    if (usesMultipartUpload) {
-  await uploadLargeFile(
-    authFetch,
-    selectedFile,
-    currentParentId,
-    {
-      signal:
-        uploadAbortController?.signal,
-      onProgress: ({ percent }) => {
-        setUploadProgress(percent);
+  if (usesMultipartUpload) {
+    const uploadedFile = await uploadLargeFile(
+      authFetch,
+      selectedFile,
+      currentParentId,
+      {
+        signal: uploadAbortController?.signal,
+        onProgress: ({ percent }) => {
+          setUploadProgress(percent);
+        },
       },
-    },
-  );
-} else {
-  await uploadFile(
-    authFetch,
-    selectedFile,
-    currentParentId,
-  );
-}
+    );
 
-    setReloadVersion((version) => version + 1);
+    setFiles((currentFiles) => [
+      uploadedFile,
+      ...currentFiles.filter(
+        (file) => file.id !== uploadedFile.id,
+      ),
+    ]);
+  } else {
+    const uploadedFile = await uploadFile(
+      authFetch,
+      selectedFile,
+      currentParentId,
+    );
+
+    setFiles((currentFiles) => [
+      uploadedFile,
+      ...currentFiles.filter(
+        (file) => file.id !== uploadedFile.id,
+      ),
+    ]);
+  }
   } catch (requestError) {
     if (
     isMultipartUploadAbortError(requestError)
@@ -977,16 +1165,40 @@ const handleMoveFile = async (
   key={file.id}
 >
   <span className="file-card__icon">
+  {filePreviewUrls[file.id] ? (
+    <img
+      className="file-card__preview"
+      src={filePreviewUrls[file.id]}
+      alt=""
+      onError={() => {
+        setFilePreviewUrls((current) => {
+          const next = { ...current };
+          delete next[file.id];
+
+          return next;
+        });
+      }}
+    />
+  ) : (
     <FileIcon />
-  </span>
+  )}
+</span>
 
   <span className="file-card__content">
     <strong title={file.name}>{file.name}</strong>
-    <span>
-      {formatFileSize(file.size)}
-      {' · '}
-      {formatFileDate(file.createdAt)}
-    </span>
+    {file.status === 'READY' ? (
+  <span>
+    {formatFileSize(file.size)}
+    {' · '}
+    {formatFileDate(file.createdAt)}
+  </span>
+) : (
+  <span
+    className={`file-card__status file-card__status--${file.status.toLowerCase()}`}
+  >
+    {fileStatusLabel(file.status) ?? file.status}
+  </span>
+)}
   </span>
 
   <div
@@ -996,6 +1208,7 @@ const handleMoveFile = async (
     <button
       className="folder-card__menu-button"
       type="button"
+      disabled={file.status !== 'READY'}
       aria-label={`Действия с файлом ${file.name}`}
       aria-expanded={activeFileMenuId === file.id}
       onClick={() => {

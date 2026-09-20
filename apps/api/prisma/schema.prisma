@@ -182,3 +182,16 @@ model AuthSession {
   @@index([userId, revokedAt])
   @@index([expiresAt])
 }
+
+model OutboxEvent {
+  id          String    @id @default(uuid()) @db.Uuid
+  type        String
+  aggregateId String    @db.Uuid
+  payload     Json
+  createdAt   DateTime  @default(now())
+  publishedAt DateTime?
+  attempts    Int       @default(0)
+  lastError   String?
+
+  @@index([publishedAt, createdAt])
+}

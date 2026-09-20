@@ -16,6 +16,7 @@ import {
   type MultipartUploadPart,
   type ObjectStorage,
 } from '../storage/object-storage.interface';
+import type { PreviewFileResponseDto } from './dto/preview-file-response.dto';
 import type {
   MultipartUploadedPartResponseDto,
   MultipartUploadStatusResponseDto,
@@ -28,8 +29,6 @@ import type { DownloadFileResponseDto } from './dto/download-file-response.dto';
 import type { FileResponseDto } from './dto/file-response.dto';
 import type { UploadFileDto } from './dto/upload-file.dto';
 import type { MoveFileDto } from './dto/move-file.dto';
-import { FileProcessingQueueService } from '../queue/file-processing-queue.service';
-import type { ProcessFileJob } from '../queue/file-processing.constants';
 
 const SIMPLE_UPLOAD_MAX_SIZE_BYTES = 10n * 1024n * 1024n;
 const MULTIPART_UPLOAD_PART_SIZE_BYTES = 8n * 1024n * 1024n;
@@ -39,6 +38,7 @@ const MAX_MULTIPART_PARTS = 10_000;
 const MULTIPART_PART_URL_TTL_SECONDS = 15 * 60;
 const MULTIPART_COMPLETION_RECOVERY_DELAY_MS = 30 * 1000;
 const MULTIPART_ABORT_RECOVERY_DELAY_MS = 30 * 1000;
+const PROCESS_FILE_OUTBOX_EVENT_TYPE = 'PROCESS_FILE';
 
 const FILE_SELECT = {
   id: true,
@@ -128,7 +128,6 @@ export class FilesService {
     private readonly prisma: PrismaService,
     @Inject(OBJECT_STORAGE)
     private readonly objectStorage: ObjectStorage,
-    private readonly fileProcessingQueue: FileProcessingQueueService,
   ) {}
 
   async upload(
@@ -153,13 +152,10 @@ export class FilesService {
       contentType: mimeType ?? undefined,
     });
 
-    let created: {
-      file: FileRecord;
-      job: ProcessFileJob;
-    };
+    let createdFile: FileRecord;
 
     try {
-      created = await this.prisma.$transaction(async (transaction) => {
+      createdFile = await this.prisma.$transaction(async (transaction) => {
         const fileMetadata = await transaction.file.create({
           data: {
             name: fileName,
@@ -208,23 +204,26 @@ export class FilesService {
           select: FILE_SELECT,
         });
 
-        return {
-          file: processingFile,
-          job: {
-            fileId: fileMetadata.id,
-            versionId: version.id,
-            storedObjectId: storedObject.id,
+        await transaction.outboxEvent.create({
+          data: {
+            type: PROCESS_FILE_OUTBOX_EVENT_TYPE,
+            aggregateId: fileMetadata.id,
+            payload: {
+              fileId: fileMetadata.id,
+              versionId: version.id,
+              storedObjectId: storedObject.id,
+            },
           },
-        };
+        });
+
+        return processingFile;
       });
     } catch (error: unknown) {
       await this.removeOrphanedObject(objectKey);
       throw error;
     }
 
-    await this.fileProcessingQueue.enqueue(created.job);
-
-    return this.toResponseDto(created.file);
+    return this.toResponseDto(createdFile);
   }
 
   async initiateMultipartUpload(
@@ -862,7 +861,9 @@ export class FilesService {
       where: {
         ownerId,
         folderId: normalizedFolderId,
-        status: 'READY',
+        status: {
+          in: ['PROCESSING', 'READY', 'FAILED'],
+        },
         deletedAt: null,
       },
       orderBy: [
@@ -928,6 +929,68 @@ export class FilesService {
     };
   }
 
+  async createPreviewUrl(
+    ownerId: string,
+    fileId: string,
+  ): Promise<PreviewFileResponseDto> {
+    const file = await this.prisma.file.findFirst({
+      where: {
+        id: fileId,
+        ownerId,
+        status: 'READY',
+        deletedAt: null,
+      },
+      select: {
+        currentVersion: {
+          select: {
+            previewObjectKey: true,
+            previewMimeType: true,
+            previewWidth: true,
+            previewHeight: true,
+          },
+        },
+      },
+    });
+
+    if (!file) {
+      throw new NotFoundException('File not found');
+    }
+
+    if (!file.currentVersion) {
+      throw new InternalServerErrorException('File metadata is incomplete');
+    }
+
+    const { previewObjectKey, previewMimeType, previewWidth, previewHeight } =
+      file.currentVersion;
+
+    if (
+      !previewObjectKey ||
+      !previewMimeType ||
+      previewWidth === null ||
+      previewHeight === null
+    ) {
+      throw new NotFoundException('File preview not found');
+    }
+
+    const expiresInSeconds = 10 * 60;
+
+    const url = await this.objectStorage.createPresignedDownloadUrl({
+      objectKey: previewObjectKey,
+      downloadFileName: 'preview.webp',
+      contentType: previewMimeType,
+      expiresInSeconds,
+      contentDisposition: 'inline',
+    });
+
+    return {
+      url,
+      expiresAt: new Date(Date.now() + expiresInSeconds * 1000),
+      mimeType: previewMimeType,
+      width: previewWidth,
+      height: previewHeight,
+    };
+  }
+
   async rename(
     ownerId: string,
     fileId: string,
@@ -937,7 +1000,9 @@ export class FilesService {
       where: {
         id: fileId,
         ownerId,
-        status: 'READY',
+        status: {
+          in: ['PROCESSING', 'READY', 'FAILED'],
+        },
         deletedAt: null,
       },
       select: {
@@ -1016,6 +1081,7 @@ export class FilesService {
         status: true,
         currentVersion: {
           select: {
+            previewObjectKey: true,
             storedObject: {
               select: {
                 id: true,
@@ -1054,6 +1120,18 @@ export class FilesService {
 
     const storedObject = file.currentVersion.storedObject;
     const shouldDeleteStoredObject = storedObject._count.versions === 1;
+
+    const previewObjectKey = file.currentVersion.previewObjectKey;
+
+    if (previewObjectKey) {
+      try {
+        await this.objectStorage.deleteObject(previewObjectKey);
+      } catch {
+        throw new ServiceUnavailableException(
+          'Object storage is temporarily unavailable',
+        );
+      }
+    }
 
     if (shouldDeleteStoredObject) {
       try {
@@ -1466,14 +1544,6 @@ export class FilesService {
       );
     }
 
-    if (file.status === 'PROCESSING') {
-      await this.fileProcessingQueue.enqueue({
-        fileId: file.id,
-        versionId: file.currentVersion.id,
-        storedObjectId: file.currentVersion.storedObjectId,
-      });
-    }
-
     return this.toResponseDto(file);
   }
 
@@ -1576,6 +1646,18 @@ export class FilesService {
         data: {
           fileId: fileMetadata.id,
           status: 'COMPLETED',
+        },
+      });
+
+      await transaction.outboxEvent.create({
+        data: {
+          type: PROCESS_FILE_OUTBOX_EVENT_TYPE,
+          aggregateId: fileMetadata.id,
+          payload: {
+            fileId: fileMetadata.id,
+            versionId: version.id,
+            storedObjectId: storedObject.id,
+          },
         },
       });
 

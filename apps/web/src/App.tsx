@@ -20,8 +20,9 @@ function App() {
         </Route>
 
         <Route element={<ProtectedRoute />}>
-          <Route path="/" element={<DashboardPage />} />
-        </Route>
+  <Route path="/" element={<DashboardPage />} />
+  <Route path="/folders/*" element={<DashboardPage />} />
+</Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

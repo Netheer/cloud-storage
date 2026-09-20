@@ -10,6 +10,7 @@ import {
   OBJECT_STORAGE,
   type ObjectStorage,
 } from '../src/storage/object-storage.interface';
+import { OutboxPublisherService } from '../src/outbox/outbox-publisher.service';
 
 type TestUser = {
   id: string;
@@ -51,7 +52,10 @@ describe('Multipart storage integration (e2e)', () => {
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(OutboxPublisherService)
+      .useValue({})
+      .compile();
 
     app = moduleFixture.createNestApplication();
 
@@ -248,7 +252,7 @@ describe('Multipart storage integration (e2e)', () => {
 
     expect(completedFile).toMatchObject({
       name: 'real-multipart.bin',
-      status: 'READY',
+      status: 'PROCESSING',
       size: totalSize.toString(),
     });
 
@@ -259,7 +263,16 @@ describe('Multipart storage integration (e2e)', () => {
 
     expect(repeatedCompletionResponse.body).toMatchObject({
       id: completedFile.id,
-      status: 'READY',
+      status: 'PROCESSING',
+    });
+
+    await prisma.file.update({
+      where: {
+        id: completedFile.id,
+      },
+      data: {
+        status: 'READY',
+      },
     });
 
     const downloadResponse = await request(app.getHttpServer())

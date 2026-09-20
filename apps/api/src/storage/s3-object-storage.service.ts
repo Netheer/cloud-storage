@@ -126,6 +126,8 @@ export class S3ObjectStorageService implements ObjectStorage, OnModuleDestroy {
       (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
     );
 
+    const contentDisposition = input.contentDisposition ?? 'attachment';
+
     return getSignedUrl(
       this.client,
       new GetObjectCommand({
@@ -133,7 +135,7 @@ export class S3ObjectStorageService implements ObjectStorage, OnModuleDestroy {
         Key: input.objectKey,
         ResponseContentType: input.contentType ?? 'application/octet-stream',
         ResponseContentDisposition:
-          `attachment; filename="download"; ` +
+          `${contentDisposition}; filename="download"; ` +
           `filename*=UTF-8''${encodedFileName}`,
       }),
       {

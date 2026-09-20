@@ -10,6 +10,7 @@ import {
   OBJECT_STORAGE,
   type ObjectStorage,
 } from '../src/storage/object-storage.interface';
+import { OutboxPublisherService } from '../src/outbox/outbox-publisher.service';
 
 type FileBody = {
   id: string;
@@ -81,6 +82,8 @@ describe('Files (e2e)', () => {
     })
       .overrideProvider(OBJECT_STORAGE)
       .useValue(objectStorageMock)
+      .overrideProvider(OutboxPublisherService)
+      .useValue({})
       .compile();
 
     app = moduleFixture.createNestApplication();
@@ -140,6 +143,29 @@ describe('Files (e2e)', () => {
   });
 
   afterAll(async () => {
+    if (createdUserIds.length > 0) {
+      const files = await prisma.file.findMany({
+        where: {
+          ownerId: {
+            in: createdUserIds,
+          },
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      if (files.length > 0) {
+        await prisma.outboxEvent.deleteMany({
+          where: {
+            aggregateId: {
+              in: files.map((file) => file.id),
+            },
+          },
+        });
+      }
+    }
+
     await prisma.user.deleteMany({
       where: {
         email: {
@@ -267,6 +293,17 @@ describe('Files (e2e)', () => {
     return response.body as FileBody;
   }
 
+  async function markFileReady(fileId: string): Promise<void> {
+    await prisma.file.update({
+      where: {
+        id: fileId,
+      },
+      data: {
+        status: 'READY',
+      },
+    });
+  }
+
   it('uploads and lists root and nested files with owner isolation', async () => {
     const folderId = await createFolder(
       owner.accessToken,
@@ -290,7 +327,7 @@ describe('Files (e2e)', () => {
       name: 'root-file.txt',
       ownerId: owner.id,
       folderId: null,
-      status: 'READY',
+      status: 'PROCESSING',
       mimeType: 'text/plain',
       size: Buffer.byteLength('Root file content').toString(),
     });
@@ -299,8 +336,35 @@ describe('Files (e2e)', () => {
       name: 'nested-file.txt',
       ownerId: owner.id,
       folderId,
-      status: 'READY',
+      status: 'PROCESSING',
     });
+
+    const outboxEvents = await prisma.outboxEvent.findMany({
+      where: {
+        aggregateId: {
+          in: [rootFile.id, nestedFile.id],
+        },
+        type: 'PROCESS_FILE',
+      },
+    });
+
+    expect(outboxEvents).toHaveLength(2);
+
+    expect(outboxEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          aggregateId: rootFile.id,
+          publishedAt: null,
+        }),
+        expect.objectContaining({
+          aggregateId: nestedFile.id,
+          publishedAt: null,
+        }),
+      ]),
+    );
+
+    await markFileReady(rootFile.id);
+    await markFileReady(nestedFile.id);
 
     expect(putObjectMock).toHaveBeenCalledTimes(2);
 
@@ -441,6 +505,8 @@ describe('Files (e2e)', () => {
       Buffer.from('Download content'),
     );
 
+    await markFileReady(file.id);
+
     const response = await request(app.getHttpServer())
       .get(`/files/${file.id}/download`)
       .set(authorization(owner.accessToken))
@@ -473,12 +539,105 @@ describe('Files (e2e)', () => {
       .expect(400);
   });
 
+  it('creates a temporary preview URL only for the owner', async () => {
+    const file = await uploadFile(
+      owner.accessToken,
+      'preview-image.png',
+      Buffer.from('Preview image content'),
+    );
+
+    await markFileReady(file.id);
+
+    const fileMetadata = await prisma.file.findUnique({
+      where: {
+        id: file.id,
+      },
+      select: {
+        currentVersionId: true,
+      },
+    });
+
+    if (!fileMetadata?.currentVersionId) {
+      throw new Error('File current version is missing');
+    }
+
+    const previewObjectKey = `users/${owner.id}/previews/${file.id}.webp`;
+
+    await prisma.fileVersion.update({
+      where: {
+        id: fileMetadata.currentVersionId,
+      },
+      data: {
+        previewObjectKey,
+        previewMimeType: 'image/webp',
+        previewWidth: 512,
+        previewHeight: 341,
+      },
+    });
+
+    const response = await request(app.getHttpServer())
+      .get(`/files/${file.id}/preview`)
+      .set(authorization(owner.accessToken))
+      .expect(200);
+
+    const body = response.body as {
+      url: string;
+      expiresAt: string;
+      mimeType: string;
+      width: number;
+      height: number;
+    };
+
+    expect(response.body).toMatchObject({
+      url: 'https://storage.test/download',
+      mimeType: 'image/webp',
+      width: 512,
+      height: 341,
+    });
+
+    expect(typeof body.expiresAt).toBe('string');
+
+    expect(createPresignedDownloadUrlMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        objectKey: previewObjectKey,
+        downloadFileName: 'preview.webp',
+        contentType: 'image/webp',
+        expiresInSeconds: 600,
+        contentDisposition: 'inline',
+      }),
+    );
+
+    await request(app.getHttpServer())
+      .get(`/files/${file.id}/preview`)
+      .set(authorization(otherUser.accessToken))
+      .expect(404);
+  });
+
+  it('returns 404 when the file has no preview', async () => {
+    const file = await uploadFile(
+      owner.accessToken,
+      'without-preview.txt',
+      Buffer.from('File without preview'),
+    );
+
+    await markFileReady(file.id);
+
+    await request(app.getHttpServer())
+      .get(`/files/${file.id}/preview`)
+      .set(authorization(owner.accessToken))
+      .expect(404);
+
+    expect(createPresignedDownloadUrlMock).not.toHaveBeenCalled();
+  });
+
   it('renames a file without replacing its stored object', async () => {
     const file = await uploadFile(
       owner.accessToken,
       'before-rename.txt',
       Buffer.from('Rename content'),
     );
+
+    await markFileReady(file.id);
 
     putObjectMock.mockClear();
 
@@ -541,6 +700,8 @@ describe('Files (e2e)', () => {
       'move-me.txt',
       Buffer.from('Move content'),
     );
+
+    await markFileReady(file.id);
 
     putObjectMock.mockClear();
 
@@ -630,12 +791,14 @@ describe('Files (e2e)', () => {
     });
   });
 
-  it('deletes the file and its stored object', async () => {
+  it('deletes the file, its preview and stored object', async () => {
     const file = await uploadFile(
       owner.accessToken,
       'delete-me.txt',
       Buffer.from('Delete content'),
     );
+
+    await markFileReady(file.id);
 
     const fileMetadata = await prisma.file.findUnique({
       where: {
@@ -644,6 +807,7 @@ describe('Files (e2e)', () => {
       select: {
         currentVersion: {
           select: {
+            id: true,
             storedObject: {
               select: {
                 id: true,
@@ -661,10 +825,28 @@ describe('Files (e2e)', () => {
 
     const storedObject = fileMetadata.currentVersion.storedObject;
 
+    const previewObjectKey = `users/${owner.id}/previews/${file.id}.webp`;
+
+    await prisma.fileVersion.update({
+      where: {
+        id: fileMetadata.currentVersion.id,
+      },
+      data: {
+        previewObjectKey,
+        previewMimeType: 'image/webp',
+        previewWidth: 512,
+        previewHeight: 341,
+      },
+    });
+
     await request(app.getHttpServer())
       .delete(`/files/${file.id}`)
       .set(authorization(owner.accessToken))
       .expect(204);
+
+    expect(deleteObjectMock).toHaveBeenCalledTimes(2);
+
+    expect(deleteObjectMock).toHaveBeenCalledWith(previewObjectKey);
 
     expect(deleteObjectMock).toHaveBeenCalledWith(storedObject.objectKey);
 
@@ -701,6 +883,8 @@ describe('Files (e2e)', () => {
       'retry-delete.txt',
       Buffer.from('Retry delete content'),
     );
+
+    await markFileReady(file.id);
 
     deleteObjectMock.mockRejectedValueOnce(new Error('Storage is unavailable'));
 
@@ -1431,7 +1615,7 @@ describe('Files (e2e)', () => {
       name: 'completed-multipart.bin',
       ownerId: owner.id,
       folderId: null,
-      status: 'READY',
+      status: 'PROCESSING',
       mimeType: 'application/octet-stream',
       size: totalSize.toString(),
     });
@@ -1494,7 +1678,7 @@ describe('Files (e2e)', () => {
 
     expect(repeatedResponse.body).toMatchObject({
       id: completedFile.id,
-      status: 'READY',
+      status: 'PROCESSING',
     });
 
     expect(completeMultipartUploadMock).toHaveBeenCalledTimes(1);
@@ -1625,7 +1809,7 @@ describe('Files (e2e)', () => {
     expect(recoveredFile).toMatchObject({
       name: 'recovered-multipart.bin',
       ownerId: owner.id,
-      status: 'READY',
+      status: 'PROCESSING',
       size: totalSize.toString(),
     });
 
@@ -2039,7 +2223,7 @@ describe('Files (e2e)', () => {
     expect(recoveredFile).toMatchObject({
       name: 'ambiguous-completion.bin',
       ownerId: owner.id,
-      status: 'READY',
+      status: 'PROCESSING',
       size: totalSize.toString(),
     });
 

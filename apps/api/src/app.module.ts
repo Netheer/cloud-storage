@@ -8,7 +8,7 @@ import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { FoldersModule } from './folders/folders.module';
 import { FilesModule } from './files/files.module';
-import { FileProcessingQueueModule } from './queue/file-processing-queue.module';
+import { OutboxModule } from './outbox/outbox.module';
 
 @Module({
   imports: [
@@ -24,7 +24,7 @@ import { FileProcessingQueueModule } from './queue/file-processing-queue.module'
     AuthModule,
     FoldersModule,
     FilesModule,
-    FileProcessingQueueModule,
+    OutboxModule,
   ],
   controllers: [AppController],
   providers: [AppService],

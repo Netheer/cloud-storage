@@ -1106,6 +1106,14 @@ button {
   color: #7890e8;
 }
 
+.file-card__preview {
+  display: block;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
 .file-card__content {
   display: grid;
   min-width: 0;
@@ -1117,6 +1125,21 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.file-card__status--processing {
+  color: #b45309 !important;
+  font-weight: 700;
+}
+
+.file-card__status--failed {
+  color: #dc2626 !important;
+  font-weight: 700;
+}
+
+.file-card .folder-card__menu-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
 }
 
 .file-card__content strong {
