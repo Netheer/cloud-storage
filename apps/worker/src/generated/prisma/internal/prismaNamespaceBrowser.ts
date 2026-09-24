@@ -54,6 +54,8 @@ export const ModelName = {
   User: 'User',
   Folder: 'Folder',
   File: 'File',
+  FolderAccessGrant: 'FolderAccessGrant',
+  FileAccessGrant: 'FileAccessGrant',
   FileVersion: 'FileVersion',
   StoredObject: 'StoredObject',
   UploadSession: 'UploadSession',
@@ -115,6 +117,30 @@ export const FileScalarFieldEnum = {
 } as const
 
 export type FileScalarFieldEnum = (typeof FileScalarFieldEnum)[keyof typeof FileScalarFieldEnum]
+
+
+export const FolderAccessGrantScalarFieldEnum = {
+  id: 'id',
+  folderId: 'folderId',
+  userId: 'userId',
+  role: 'role',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type FolderAccessGrantScalarFieldEnum = (typeof FolderAccessGrantScalarFieldEnum)[keyof typeof FolderAccessGrantScalarFieldEnum]
+
+
+export const FileAccessGrantScalarFieldEnum = {
+  id: 'id',
+  fileId: 'fileId',
+  userId: 'userId',
+  role: 'role',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type FileAccessGrantScalarFieldEnum = (typeof FileAccessGrantScalarFieldEnum)[keyof typeof FileAccessGrantScalarFieldEnum]
 
 
 export const FileVersionScalarFieldEnum = {

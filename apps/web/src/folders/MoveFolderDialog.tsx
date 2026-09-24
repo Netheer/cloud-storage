@@ -8,6 +8,10 @@ interface MoveFolderDialogProps {
   itemType: 'folder' | 'file';
   currentFolderId: string | null;
   excludedFolderId?: string;
+  sharedRoot?: {
+  id: string;
+  name: string;
+} | null;
   isSubmitting: boolean;
   error: string | null;
   onClose: () => void;
@@ -24,6 +28,7 @@ export function MoveFolderDialog({
   itemType,
   currentFolderId,
   excludedFolderId,
+  sharedRoot = null,
   isSubmitting,
   error,
   onClose,
@@ -31,9 +36,10 @@ export function MoveFolderDialog({
 }: MoveFolderDialogProps) {
   const { authFetch } = useAuth();
 
-  const [breadcrumbs, setBreadcrumbs] = useState<
-    DestinationBreadcrumb[]
-  >([]);
+  const [breadcrumbs, setBreadcrumbs] =
+  useState<DestinationBreadcrumb[]>(
+    sharedRoot ? [sharedRoot] : [],
+  );
   const [folders, setFolders] = useState<Folder[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] =
@@ -117,8 +123,12 @@ export function MoveFolderDialog({
   };
 
   const handleOpenRoot = () => {
-    setBreadcrumbs([]);
-  };
+  setBreadcrumbs(
+    sharedRoot
+      ? [sharedRoot]
+      : [],
+  );
+};
 
   const handleOpenBreadcrumb = (index: number) => {
     setBreadcrumbs((current) =>
@@ -173,9 +183,14 @@ export function MoveFolderDialog({
           className="move-dialog__breadcrumbs"
           aria-label="Папка назначения"
         >
-          <button type="button" onClick={handleOpenRoot}>
-            Мои файлы
-          </button>
+          <button
+  type="button"
+  onClick={handleOpenRoot}
+>
+  {sharedRoot
+    ? 'Доступные мне'
+    : 'Мои файлы'}
+</button>
 
           {breadcrumbs.map((breadcrumb, index) => (
             <span key={breadcrumb.id}>

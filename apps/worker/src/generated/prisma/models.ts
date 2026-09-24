@@ -11,6 +11,8 @@
 export type * from './models/User.js'
 export type * from './models/Folder.js'
 export type * from './models/File.js'
+export type * from './models/FolderAccessGrant.js'
+export type * from './models/FileAccessGrant.js'
 export type * from './models/FileVersion.js'
 export type * from './models/StoredObject.js'
 export type * from './models/UploadSession.js'

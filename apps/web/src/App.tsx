@@ -9,6 +9,7 @@ import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { ProtectedRoute } from './routing/ProtectedRoute';
 import { PublicOnlyRoute } from './routing/PublicOnlyRoute';
+import { SharedPage } from './pages/SharedPage';
 
 function App() {
   return (
@@ -23,6 +24,15 @@ function App() {
   <Route path="/" element={<DashboardPage />} />
   <Route path="/folders/*" element={<DashboardPage />} />
 </Route>
+<Route
+    path="/shared"
+    element={<SharedPage />}
+  />
+
+  <Route
+    path="/shared/folders/*"
+    element={<DashboardPage />}
+  />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

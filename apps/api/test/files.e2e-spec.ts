@@ -462,6 +462,199 @@ describe('Files (e2e)', () => {
     expect(putObjectMock).toHaveBeenCalledTimes(2);
   });
 
+  it('uploads a new version of an existing file', async () => {
+    const originalContent = Buffer.from('Original version content');
+    const newContent = Buffer.from('Updated version content');
+
+    const file = await uploadFile(
+      owner.accessToken,
+      'versioned-file.txt',
+      originalContent,
+    );
+
+    await markFileReady(file.id);
+
+    const originalMetadata = await prisma.file.findUnique({
+      where: {
+        id: file.id,
+      },
+      select: {
+        id: true,
+        name: true,
+        currentVersionId: true,
+        versions: {
+          orderBy: {
+            versionNumber: 'asc',
+          },
+          select: {
+            id: true,
+            versionNumber: true,
+            originalName: true,
+            mimeType: true,
+            size: true,
+            storedObject: {
+              select: {
+                id: true,
+                objectKey: true,
+                size: true,
+                referenceCount: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(originalMetadata).not.toBeNull();
+    expect(originalMetadata?.versions).toHaveLength(1);
+    expect(originalMetadata?.versions[0]).toMatchObject({
+      versionNumber: 1,
+      originalName: 'versioned-file.txt',
+      mimeType: 'text/plain',
+      size: BigInt(originalContent.length),
+    });
+
+    const originalVersionId = originalMetadata?.currentVersionId;
+    const originalStoredObjectId =
+      originalMetadata?.versions[0]?.storedObject.id;
+
+    if (!originalVersionId || !originalStoredObjectId) {
+      throw new Error('Original file version metadata is missing');
+    }
+
+    putObjectMock.mockClear();
+
+    const response = await request(app.getHttpServer())
+      .post(`/files/${file.id}/versions`)
+      .set(authorization(owner.accessToken))
+      .attach('file', newContent, {
+        filename: 'replacement-name.txt',
+        contentType: 'text/plain',
+      })
+      .expect(201);
+
+    const updatedFile = response.body as FileBody;
+
+    expect(updatedFile).toMatchObject({
+      id: file.id,
+      name: 'versioned-file.txt',
+      ownerId: owner.id,
+      folderId: null,
+      status: 'PROCESSING',
+      mimeType: 'text/plain',
+      size: newContent.length.toString(),
+    });
+
+    expect(putObjectMock).toHaveBeenCalledTimes(1);
+
+    const updatedMetadata = await prisma.file.findUnique({
+      where: {
+        id: file.id,
+      },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        currentVersionId: true,
+        versions: {
+          orderBy: {
+            versionNumber: 'asc',
+          },
+          select: {
+            id: true,
+            versionNumber: true,
+            originalName: true,
+            mimeType: true,
+            size: true,
+            storedObject: {
+              select: {
+                id: true,
+                objectKey: true,
+                size: true,
+                referenceCount: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(updatedMetadata).not.toBeNull();
+    expect(updatedMetadata?.id).toBe(file.id);
+    expect(updatedMetadata?.name).toBe('versioned-file.txt');
+    expect(updatedMetadata?.status).toBe('PROCESSING');
+    expect(updatedMetadata?.versions).toHaveLength(2);
+
+    const firstVersion = updatedMetadata?.versions[0];
+    const secondVersion = updatedMetadata?.versions[1];
+
+    expect(firstVersion).toMatchObject({
+      id: originalVersionId,
+      versionNumber: 1,
+      originalName: 'versioned-file.txt',
+      mimeType: 'text/plain',
+      size: BigInt(originalContent.length),
+    });
+
+    expect(firstVersion?.storedObject.id).toBe(originalStoredObjectId);
+
+    expect(secondVersion).toMatchObject({
+      versionNumber: 2,
+      originalName: 'replacement-name.txt',
+      mimeType: 'text/plain',
+      size: BigInt(newContent.length),
+    });
+
+    expect(secondVersion?.storedObject.id).not.toBe(originalStoredObjectId);
+    expect(secondVersion?.storedObject.objectKey).toMatch(
+      new RegExp(`^users/${owner.id}/objects/`),
+    );
+    expect(secondVersion?.storedObject).toMatchObject({
+      size: BigInt(newContent.length),
+      referenceCount: 1,
+    });
+
+    expect(updatedMetadata?.currentVersionId).toBe(secondVersion?.id);
+
+    const outboxEvents = await prisma.outboxEvent.findMany({
+      where: {
+        aggregateId: file.id,
+        type: 'PROCESS_FILE',
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+    });
+
+    expect(outboxEvents).toHaveLength(2);
+
+    expect(outboxEvents[1]?.payload).toMatchObject({
+      fileId: file.id,
+      versionId: secondVersion?.id,
+      storedObjectId: secondVersion?.storedObject.id,
+    });
+
+    await request(app.getHttpServer())
+      .post(`/files/${file.id}/versions`)
+      .set(authorization(otherUser.accessToken))
+      .attach('file', Buffer.from('Foreign version'), {
+        filename: 'foreign-version.txt',
+        contentType: 'text/plain',
+      })
+      .expect(404);
+
+    await request(app.getHttpServer())
+      .post(`/files/${file.id}/versions`)
+      .set(authorization(owner.accessToken))
+      .attach('file', Buffer.from('Too early'), {
+        filename: 'too-early.txt',
+        contentType: 'text/plain',
+      })
+      .expect(409);
+
+    expect(putObjectMock).toHaveBeenCalledTimes(1);
+  });
+
   it('validates upload requests and enforces the size limit', async () => {
     await request(app.getHttpServer())
       .post('/files/upload')
@@ -496,6 +689,77 @@ describe('Files (e2e)', () => {
         contentType: 'application/octet-stream',
       })
       .expect(413);
+  });
+
+  it('lists all file versions with the current version marked', async () => {
+    const originalContent = Buffer.from('Original history content');
+    const updatedContent = Buffer.from('Updated history content');
+
+    const file = await uploadFile(
+      owner.accessToken,
+      'history-file.txt',
+      originalContent,
+    );
+
+    await markFileReady(file.id);
+
+    await request(app.getHttpServer())
+      .post(`/files/${file.id}/versions`)
+      .set(authorization(owner.accessToken))
+      .attach('file', updatedContent, {
+        filename: 'history-file-v2.txt',
+        contentType: 'text/plain',
+      })
+      .expect(201);
+
+    const response = await request(app.getHttpServer())
+      .get(`/files/${file.id}/versions`)
+      .set(authorization(owner.accessToken))
+      .expect(200);
+
+    const versions = response.body as Array<{
+      id: string;
+      versionNumber: number;
+      originalName: string;
+      mimeType: string | null;
+      size: string;
+      createdAt: string;
+      isCurrent: boolean;
+    }>;
+
+    expect(versions).toHaveLength(2);
+
+    expect(versions[0]).toMatchObject({
+      versionNumber: 2,
+      originalName: 'history-file-v2.txt',
+      mimeType: 'text/plain',
+      size: updatedContent.length.toString(),
+      isCurrent: true,
+    });
+
+    expect(versions[1]).toMatchObject({
+      versionNumber: 1,
+      originalName: 'history-file.txt',
+      mimeType: 'text/plain',
+      size: originalContent.length.toString(),
+      isCurrent: false,
+    });
+
+    expect(typeof versions[0]?.id).toBe('string');
+    expect(typeof versions[1]?.id).toBe('string');
+
+    expect(typeof versions[0]?.createdAt).toBe('string');
+    expect(typeof versions[1]?.createdAt).toBe('string');
+
+    await request(app.getHttpServer())
+      .get(`/files/${file.id}/versions`)
+      .set(authorization(otherUser.accessToken))
+      .expect(404);
+
+    await request(app.getHttpServer())
+      .get('/files/not-a-uuid/versions')
+      .set(authorization(owner.accessToken))
+      .expect(400);
   });
 
   it('creates a temporary download URL only for the owner', async () => {
@@ -611,6 +875,145 @@ describe('Files (e2e)', () => {
       .get(`/files/${file.id}/preview`)
       .set(authorization(otherUser.accessToken))
       .expect(404);
+  });
+
+  it('creates download URLs for specific file versions', async () => {
+    const originalContent = Buffer.from('Version download original content');
+    const updatedContent = Buffer.from('Version download updated content');
+
+    const file = await uploadFile(
+      owner.accessToken,
+      'download-version-v1.txt',
+      originalContent,
+    );
+
+    await markFileReady(file.id);
+
+    await request(app.getHttpServer())
+      .post(`/files/${file.id}/versions`)
+      .set(authorization(owner.accessToken))
+      .attach('file', updatedContent, {
+        filename: 'download-version-v2.txt',
+        contentType: 'text/plain',
+      })
+      .expect(201);
+
+    const fileMetadata = await prisma.file.findUnique({
+      where: {
+        id: file.id,
+      },
+      select: {
+        currentVersionId: true,
+        versions: {
+          orderBy: {
+            versionNumber: 'asc',
+          },
+          select: {
+            id: true,
+            versionNumber: true,
+            originalName: true,
+            storedObject: {
+              select: {
+                objectKey: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!fileMetadata?.currentVersionId || fileMetadata.versions.length !== 2) {
+      throw new Error('File version metadata is missing');
+    }
+
+    const firstVersion = fileMetadata.versions[0];
+    const secondVersion = fileMetadata.versions[1];
+
+    if (!firstVersion || !secondVersion) {
+      throw new Error('Expected two file versions');
+    }
+
+    expect(firstVersion.versionNumber).toBe(1);
+    expect(secondVersion.versionNumber).toBe(2);
+    expect(fileMetadata.currentVersionId).toBe(secondVersion.id);
+
+    createPresignedDownloadUrlMock.mockClear();
+
+    await request(app.getHttpServer())
+      .get(`/files/${file.id}/versions/${firstVersion.id}/download`)
+      .set(authorization(owner.accessToken))
+      .expect(200);
+
+    expect(createPresignedDownloadUrlMock).toHaveBeenLastCalledWith({
+      objectKey: firstVersion.storedObject.objectKey,
+      downloadFileName: 'download-version-v1.txt',
+      contentType: 'text/plain',
+      expiresInSeconds: 600,
+    });
+
+    await request(app.getHttpServer())
+      .get(`/files/${file.id}/versions/${secondVersion.id}/download`)
+      .set(authorization(owner.accessToken))
+      .expect(200);
+
+    expect(createPresignedDownloadUrlMock).toHaveBeenLastCalledWith({
+      objectKey: secondVersion.storedObject.objectKey,
+      downloadFileName: 'download-version-v2.txt',
+      contentType: 'text/plain',
+      expiresInSeconds: 600,
+    });
+
+    const metadataAfterDownloads = await prisma.file.findUnique({
+      where: {
+        id: file.id,
+      },
+      select: {
+        currentVersionId: true,
+      },
+    });
+
+    expect(metadataAfterDownloads?.currentVersionId).toBe(secondVersion.id);
+
+    await request(app.getHttpServer())
+      .get(`/files/${file.id}/versions/${firstVersion.id}/download`)
+      .set(authorization(otherUser.accessToken))
+      .expect(404);
+
+    const anotherFile = await uploadFile(
+      owner.accessToken,
+      'another-versioned-file.txt',
+      Buffer.from('Another file content'),
+    );
+
+    const anotherFileMetadata = await prisma.file.findUnique({
+      where: {
+        id: anotherFile.id,
+      },
+      select: {
+        currentVersionId: true,
+      },
+    });
+
+    if (!anotherFileMetadata?.currentVersionId) {
+      throw new Error('Another file version metadata is missing');
+    }
+
+    await request(app.getHttpServer())
+      .get(
+        `/files/${file.id}/versions/${anotherFileMetadata.currentVersionId}/download`,
+      )
+      .set(authorization(owner.accessToken))
+      .expect(404);
+
+    await request(app.getHttpServer())
+      .get(`/files/not-a-uuid/versions/${firstVersion.id}/download`)
+      .set(authorization(owner.accessToken))
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .get(`/files/${file.id}/versions/not-a-uuid/download`)
+      .set(authorization(owner.accessToken))
+      .expect(400);
   });
 
   it('returns 404 when the file has no preview', async () => {
@@ -875,6 +1278,211 @@ describe('Files (e2e)', () => {
       .delete(`/files/${file.id}`)
       .set(authorization(owner.accessToken))
       .expect(404);
+  });
+
+  it('deletes all versions, previews and unique stored objects of a versioned file', async () => {
+    const originalContent = Buffer.from('Versioned delete original content');
+    const updatedContent = Buffer.from('Versioned delete updated content');
+
+    const file = await uploadFile(
+      owner.accessToken,
+      'versioned-delete.txt',
+      originalContent,
+    );
+
+    await markFileReady(file.id);
+
+    await request(app.getHttpServer())
+      .post(`/files/${file.id}/versions`)
+      .set(authorization(owner.accessToken))
+      .attach('file', updatedContent, {
+        filename: 'versioned-delete-v2.txt',
+        contentType: 'text/plain',
+      })
+      .expect(201);
+
+    await markFileReady(file.id);
+
+    const metadataBeforeRestore = await prisma.file.findUnique({
+      where: {
+        id: file.id,
+      },
+      select: {
+        versions: {
+          orderBy: {
+            versionNumber: 'asc',
+          },
+          select: {
+            id: true,
+            versionNumber: true,
+            storedObjectId: true,
+          },
+        },
+      },
+    });
+
+    if (!metadataBeforeRestore || metadataBeforeRestore.versions.length !== 2) {
+      throw new Error('Expected two versions before restore');
+    }
+
+    const firstVersion = metadataBeforeRestore.versions[0];
+    const secondVersion = metadataBeforeRestore.versions[1];
+
+    if (!firstVersion || !secondVersion) {
+      throw new Error('File versions are missing');
+    }
+
+    await request(app.getHttpServer())
+      .post(`/files/${file.id}/versions/${firstVersion.id}/restore`)
+      .set(authorization(owner.accessToken))
+      .expect(201);
+
+    await markFileReady(file.id);
+
+    const metadataBeforeDelete = await prisma.file.findUnique({
+      where: {
+        id: file.id,
+      },
+      select: {
+        versions: {
+          orderBy: {
+            versionNumber: 'asc',
+          },
+          select: {
+            id: true,
+            versionNumber: true,
+            storedObject: {
+              select: {
+                id: true,
+                objectKey: true,
+                referenceCount: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!metadataBeforeDelete || metadataBeforeDelete.versions.length !== 3) {
+      throw new Error('Expected three versions before deletion');
+    }
+
+    const version1 = metadataBeforeDelete.versions[0];
+    const version2 = metadataBeforeDelete.versions[1];
+    const version3 = metadataBeforeDelete.versions[2];
+
+    if (!version1 || !version2 || !version3) {
+      throw new Error('Version metadata is missing');
+    }
+
+    /*
+     * Restore must have reused the physical object from V1.
+     */
+    expect(version1.storedObject.id).toBe(version3.storedObject.id);
+    expect(version1.storedObject.referenceCount).toBe(2);
+
+    expect(version2.storedObject.id).not.toBe(version1.storedObject.id);
+    expect(version2.storedObject.referenceCount).toBe(1);
+
+    const previewV1 = `users/${owner.id}/previews/${version1.id}.webp`;
+    const previewV2 = `users/${owner.id}/previews/${version2.id}.webp`;
+    const previewV3 = `users/${owner.id}/previews/${version3.id}.webp`;
+
+    await prisma.fileVersion.update({
+      where: {
+        id: version1.id,
+      },
+      data: {
+        previewObjectKey: previewV1,
+        previewMimeType: 'image/webp',
+        previewWidth: 512,
+        previewHeight: 341,
+      },
+    });
+
+    await prisma.fileVersion.update({
+      where: {
+        id: version2.id,
+      },
+      data: {
+        previewObjectKey: previewV2,
+        previewMimeType: 'image/webp',
+        previewWidth: 512,
+        previewHeight: 341,
+      },
+    });
+
+    await prisma.fileVersion.update({
+      where: {
+        id: version3.id,
+      },
+      data: {
+        previewObjectKey: previewV3,
+        previewMimeType: 'image/webp',
+        previewWidth: 512,
+        previewHeight: 341,
+      },
+    });
+
+    const firstStoredObjectId = version1.storedObject.id;
+    const secondStoredObjectId = version2.storedObject.id;
+
+    const firstStoredObjectKey = version1.storedObject.objectKey;
+    const secondStoredObjectKey = version2.storedObject.objectKey;
+
+    deleteObjectMock.mockClear();
+
+    await request(app.getHttpServer())
+      .delete(`/files/${file.id}`)
+      .set(authorization(owner.accessToken))
+      .expect(204);
+
+    /*
+     * Three unique previews + two unique physical file objects.
+     *
+     * O1 is referenced by both V1 and V3 but must be physically deleted
+     * only once.
+     */
+    expect(deleteObjectMock).toHaveBeenCalledTimes(5);
+
+    expect(deleteObjectMock).toHaveBeenCalledWith(previewV1);
+    expect(deleteObjectMock).toHaveBeenCalledWith(previewV2);
+    expect(deleteObjectMock).toHaveBeenCalledWith(previewV3);
+
+    expect(deleteObjectMock).toHaveBeenCalledWith(firstStoredObjectKey);
+    expect(deleteObjectMock).toHaveBeenCalledWith(secondStoredObjectKey);
+
+    expect(
+      deleteObjectMock.mock.calls.filter(
+        ([objectKey]) => objectKey === firstStoredObjectKey,
+      ),
+    ).toHaveLength(1);
+
+    expect(
+      await prisma.file.findUnique({
+        where: {
+          id: file.id,
+        },
+      }),
+    ).toBeNull();
+
+    expect(
+      await prisma.fileVersion.count({
+        where: {
+          fileId: file.id,
+        },
+      }),
+    ).toBe(0);
+
+    const remainingStoredObjects = await prisma.storedObject.findMany({
+      where: {
+        id: {
+          in: [firstStoredObjectId, secondStoredObjectId],
+        },
+      },
+    });
+
+    expect(remainingStoredObjects).toHaveLength(0);
   });
 
   it('can retry deletion after object storage becomes available', async () => {
@@ -1699,6 +2307,1421 @@ describe('Files (e2e)', () => {
       .expect(404);
   });
 
+  it('uploads a new file version through multipart upload', async () => {
+    const originalContent = Buffer.from('Original multipart version content');
+
+    const file = await uploadFile(
+      owner.accessToken,
+      'multipart-versioned-file.txt',
+      originalContent,
+    );
+
+    await markFileReady(file.id);
+
+    const originalMetadata = await prisma.file.findUnique({
+      where: {
+        id: file.id,
+      },
+      select: {
+        id: true,
+        name: true,
+        currentVersionId: true,
+        versions: {
+          orderBy: {
+            versionNumber: 'asc',
+          },
+          select: {
+            id: true,
+            versionNumber: true,
+            storedObjectId: true,
+          },
+        },
+      },
+    });
+
+    if (
+      !originalMetadata ||
+      !originalMetadata.currentVersionId ||
+      originalMetadata.versions.length !== 1
+    ) {
+      throw new Error('Original file version metadata is missing');
+    }
+
+    const originalVersion = originalMetadata.versions[0];
+
+    if (!originalVersion) {
+      throw new Error('Original file version is missing');
+    }
+
+    const totalSize = 11 * 1024 * 1024;
+    const clientRequestId = randomUUID();
+
+    const foreignResponse = await request(app.getHttpServer())
+      .post(`/files/${file.id}/versions/multipart`)
+      .set(authorization(otherUser.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'foreign-version.bin',
+        mimeType: 'application/octet-stream',
+        totalSize: totalSize.toString(),
+      })
+      .expect(404);
+
+    expect(foreignResponse.body).toBeDefined();
+
+    const initiationResponse = await request(app.getHttpServer())
+      .post(`/files/${file.id}/versions/multipart`)
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId,
+        fileName: 'multipart-version-v2.bin',
+        mimeType: 'application/octet-stream',
+        totalSize: totalSize.toString(),
+      })
+      .expect(201);
+
+    const initiationBody = initiationResponse.body as {
+      id?: unknown;
+      fileId?: unknown;
+      status?: unknown;
+      folderId?: unknown;
+      totalParts?: unknown;
+    };
+
+    expect(initiationBody).toMatchObject({
+      fileId: file.id,
+      status: 'UPLOADING',
+      folderId: null,
+      totalParts: 2,
+    });
+
+    if (typeof initiationBody.id !== 'string') {
+      throw new Error('Multipart version upload session ID is missing');
+    }
+
+    const sessionBeforeCompletion = await prisma.uploadSession.findUnique({
+      where: {
+        id: initiationBody.id,
+      },
+    });
+
+    if (!sessionBeforeCompletion?.multipartUploadId) {
+      throw new Error('Multipart version upload metadata is missing');
+    }
+
+    expect(sessionBeforeCompletion).toMatchObject({
+      ownerId: owner.id,
+      fileId: file.id,
+      originalName: 'multipart-version-v2.bin',
+      mimeType: 'application/octet-stream',
+      totalSize: BigInt(totalSize),
+      status: 'UPLOADING',
+    });
+
+    expect(sessionBeforeCompletion.objectKey).toMatch(
+      new RegExp(`^users/${owner.id}/objects/`),
+    );
+
+    listMultipartUploadPartsMock.mockResolvedValue([
+      {
+        partNumber: 1,
+        etag: '"version-etag-1"',
+        size: 8 * 1024 * 1024,
+      },
+      {
+        partNumber: 2,
+        etag: '"version-etag-2"',
+        size: 3 * 1024 * 1024,
+      },
+    ]);
+
+    getObjectMetadataMock.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      size: totalSize,
+      contentType: 'application/octet-stream',
+      etag: '"version-completed-object"',
+    });
+
+    const completionResponse = await request(app.getHttpServer())
+      .post(`/files/multipart/${initiationBody.id}/complete`)
+      .set(authorization(owner.accessToken))
+      .expect(200);
+
+    const completedFile = completionResponse.body as FileBody;
+
+    expect(completedFile).toMatchObject({
+      id: file.id,
+      name: 'multipart-versioned-file.txt',
+      ownerId: owner.id,
+      folderId: null,
+      status: 'PROCESSING',
+      mimeType: 'application/octet-stream',
+      size: totalSize.toString(),
+    });
+
+    expect(completeMultipartUploadMock).toHaveBeenCalledWith({
+      objectKey: sessionBeforeCompletion.objectKey,
+      uploadId: sessionBeforeCompletion.multipartUploadId,
+      parts: [
+        {
+          partNumber: 1,
+          etag: '"version-etag-1"',
+        },
+        {
+          partNumber: 2,
+          etag: '"version-etag-2"',
+        },
+      ],
+    });
+
+    const completedSession = await prisma.uploadSession.findUnique({
+      where: {
+        id: initiationBody.id,
+      },
+      select: {
+        status: true,
+        fileId: true,
+      },
+    });
+
+    expect(completedSession).toEqual({
+      status: 'COMPLETED',
+      fileId: file.id,
+    });
+
+    const updatedMetadata = await prisma.file.findUnique({
+      where: {
+        id: file.id,
+      },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        currentVersionId: true,
+        versions: {
+          orderBy: {
+            versionNumber: 'asc',
+          },
+          select: {
+            id: true,
+            versionNumber: true,
+            originalName: true,
+            mimeType: true,
+            size: true,
+            storedObject: {
+              select: {
+                id: true,
+                objectKey: true,
+                size: true,
+                referenceCount: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!updatedMetadata) {
+      throw new Error('Updated file metadata is missing');
+    }
+
+    expect(updatedMetadata.id).toBe(file.id);
+    expect(updatedMetadata.name).toBe('multipart-versioned-file.txt');
+    expect(updatedMetadata.status).toBe('PROCESSING');
+    expect(updatedMetadata.versions).toHaveLength(2);
+
+    const firstVersion = updatedMetadata.versions[0];
+    const secondVersion = updatedMetadata.versions[1];
+
+    if (!firstVersion || !secondVersion) {
+      throw new Error('Expected two file versions');
+    }
+
+    expect(firstVersion).toMatchObject({
+      id: originalVersion.id,
+      versionNumber: 1,
+      storedObject: {
+        id: originalVersion.storedObjectId,
+      },
+    });
+
+    expect(secondVersion).toMatchObject({
+      versionNumber: 2,
+      originalName: 'multipart-version-v2.bin',
+      mimeType: 'application/octet-stream',
+      size: BigInt(totalSize),
+      storedObject: {
+        objectKey: sessionBeforeCompletion.objectKey,
+        size: BigInt(totalSize),
+        referenceCount: 1,
+      },
+    });
+
+    expect(secondVersion.storedObject.id).not.toBe(
+      originalVersion.storedObjectId,
+    );
+
+    expect(updatedMetadata.currentVersionId).toBe(secondVersion.id);
+
+    expect(
+      await prisma.file.count({
+        where: {
+          id: file.id,
+        },
+      }),
+    ).toBe(1);
+
+    const outboxEvents = await prisma.outboxEvent.findMany({
+      where: {
+        aggregateId: file.id,
+        type: 'PROCESS_FILE',
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+    });
+
+    expect(outboxEvents).toHaveLength(2);
+
+    expect(outboxEvents[1]?.payload).toMatchObject({
+      fileId: file.id,
+      versionId: secondVersion.id,
+      storedObjectId: secondVersion.storedObject.id,
+    });
+
+    const repeatedResponse = await request(app.getHttpServer())
+      .post(`/files/multipart/${initiationBody.id}/complete`)
+      .set(authorization(owner.accessToken))
+      .expect(200);
+
+    expect(repeatedResponse.body).toMatchObject({
+      id: file.id,
+      status: 'PROCESSING',
+    });
+
+    expect(completeMultipartUploadMock).toHaveBeenCalledTimes(1);
+    expect(listMultipartUploadPartsMock).toHaveBeenCalledTimes(1);
+
+    expect(
+      await prisma.fileVersion.count({
+        where: {
+          fileId: file.id,
+        },
+      }),
+    ).toBe(2);
+
+    await request(app.getHttpServer())
+      .post(`/files/multipart/${initiationBody.id}/complete`)
+      .set(authorization(otherUser.accessToken))
+      .expect(404);
+  });
+
+  it('allows VIEWER to read files through folder and direct file grants', async () => {
+    const sharedFolderId = await createFolder(
+      owner.accessToken,
+      'Shared Files Folder',
+    );
+
+    const inheritedFile = await uploadFile(
+      owner.accessToken,
+      'inherited-access.txt',
+      Buffer.from('Inherited access content'),
+      sharedFolderId,
+    );
+
+    const directFile = await uploadFile(
+      owner.accessToken,
+      'direct-access.txt',
+      Buffer.from('Direct access content'),
+    );
+
+    const inaccessibleFile = await uploadFile(
+      owner.accessToken,
+      'no-access.txt',
+      Buffer.from('No access content'),
+    );
+
+    await markFileReady(inheritedFile.id);
+    await markFileReady(directFile.id);
+    await markFileReady(inaccessibleFile.id);
+
+    const inheritedMetadata = await prisma.file.findUnique({
+      where: {
+        id: inheritedFile.id,
+      },
+      select: {
+        currentVersion: {
+          select: {
+            id: true,
+          },
+        },
+      },
+    });
+
+    const directMetadata = await prisma.file.findUnique({
+      where: {
+        id: directFile.id,
+      },
+      select: {
+        currentVersion: {
+          select: {
+            id: true,
+          },
+        },
+      },
+    });
+
+    if (!inheritedMetadata?.currentVersion || !directMetadata?.currentVersion) {
+      throw new Error('Test file version metadata is missing');
+    }
+
+    /*
+     * Для preview вручную имитируем уже завершённую
+     * обработку изображения worker-ом.
+     */
+    await prisma.fileVersion.update({
+      where: {
+        id: directMetadata.currentVersion.id,
+      },
+      data: {
+        previewObjectKey: `users/${owner.id}/previews/direct-access.webp`,
+        previewMimeType: 'image/webp',
+        previewWidth: 320,
+        previewHeight: 200,
+      },
+    });
+
+    /*
+     * Первый доступ наследуется от папки.
+     */
+    await prisma.folderAccessGrant.create({
+      data: {
+        folderId: sharedFolderId,
+        userId: otherUser.id,
+        role: 'VIEWER',
+      },
+    });
+
+    /*
+     * Второй доступ выдан непосредственно файлу.
+     */
+    await prisma.fileAccessGrant.create({
+      data: {
+        fileId: directFile.id,
+        userId: otherUser.id,
+        role: 'VIEWER',
+      },
+    });
+
+    /*
+     * VIEWER shared-папки видит файлы внутри неё.
+     */
+    const sharedFolderFiles = await request(app.getHttpServer())
+      .get('/files')
+      .query({
+        folderId: sharedFolderId,
+      })
+      .set(authorization(otherUser.accessToken))
+      .expect(200);
+
+    expect(sharedFolderFiles.body).toEqual([
+      expect.objectContaining({
+        id: inheritedFile.id,
+        name: 'inherited-access.txt',
+        ownerId: owner.id,
+        folderId: sharedFolderId,
+      }),
+    ]);
+
+    /*
+     * Direct FileAccessGrant пока не делает файл
+     * видимым в root list.
+     * Shared with me появится в 5.7.
+     */
+    const otherRootFiles = await request(app.getHttpServer())
+      .get('/files')
+      .set(authorization(otherUser.accessToken))
+      .expect(200);
+
+    expect(otherRootFiles.body).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: directFile.id,
+        }),
+      ]),
+    );
+
+    /*
+     * Унаследованный VIEWER может скачать файл.
+     */
+    await request(app.getHttpServer())
+      .get(`/files/${inheritedFile.id}/download`)
+      .set(authorization(otherUser.accessToken))
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({
+          url: 'https://storage.test/download',
+        });
+      });
+
+    /*
+     * И посмотреть историю версий.
+     */
+    const inheritedVersions = await request(app.getHttpServer())
+      .get(`/files/${inheritedFile.id}/versions`)
+      .set(authorization(otherUser.accessToken))
+      .expect(200);
+
+    expect(inheritedVersions.body).toEqual([
+      expect.objectContaining({
+        id: inheritedMetadata.currentVersion.id,
+        versionNumber: 1,
+        isCurrent: true,
+      }),
+    ]);
+
+    /*
+     * И скачать конкретную историческую версию.
+     */
+    await request(app.getHttpServer())
+      .get(
+        `/files/${inheritedFile.id}/versions/${inheritedMetadata.currentVersion.id}/download`,
+      )
+      .set(authorization(otherUser.accessToken))
+      .expect(200);
+
+    /*
+     * Direct FileAccessGrant тоже разрешает
+     * операции чтения конкретного файла.
+     */
+    await request(app.getHttpServer())
+      .get(`/files/${directFile.id}/download`)
+      .set(authorization(otherUser.accessToken))
+      .expect(200);
+
+    const directVersions = await request(app.getHttpServer())
+      .get(`/files/${directFile.id}/versions`)
+      .set(authorization(otherUser.accessToken))
+      .expect(200);
+
+    expect(directVersions.body).toEqual([
+      expect.objectContaining({
+        id: directMetadata.currentVersion.id,
+        versionNumber: 1,
+        isCurrent: true,
+      }),
+    ]);
+
+    /*
+     * Preview также является VIEWER-операцией.
+     */
+    const previewResponse = await request(app.getHttpServer())
+      .get(`/files/${directFile.id}/preview`)
+      .set(authorization(otherUser.accessToken))
+      .expect(200);
+
+    expect(previewResponse.body).toMatchObject({
+      url: 'https://storage.test/download',
+      mimeType: 'image/webp',
+      width: 320,
+      height: 200,
+    });
+
+    /*
+     * Файл без direct или inherited grant
+     * остаётся полностью недоступным.
+     */
+    await request(app.getHttpServer())
+      .get(`/files/${inaccessibleFile.id}/download`)
+      .set(authorization(otherUser.accessToken))
+      .expect(404);
+
+    await request(app.getHttpServer())
+      .get(`/files/${inaccessibleFile.id}/versions`)
+      .set(authorization(otherUser.accessToken))
+      .expect(404);
+  });
+
+  it('allows EDITOR to upload, rename and move files inside shared folders', async () => {
+    const sourceFolderId = await createFolder(
+      owner.accessToken,
+      'Editor File Source',
+    );
+
+    const destinationFolderId = await createFolder(
+      owner.accessToken,
+      'Editor File Destination',
+    );
+
+    /*
+     * Начинаем с VIEWER.
+     */
+    const sourceGrant = await prisma.folderAccessGrant.create({
+      data: {
+        folderId: sourceFolderId,
+        userId: otherUser.id,
+        role: 'VIEWER',
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    /*
+     * VIEWER не может загружать файл
+     * в shared folder.
+     */
+    await request(app.getHttpServer())
+      .post('/files/upload')
+      .set(authorization(otherUser.accessToken))
+      .field('folderId', sourceFolderId)
+      .attach('file', Buffer.from('Viewer must not upload'), {
+        filename: 'viewer-denied.txt',
+        contentType: 'text/plain',
+      })
+      .expect(403);
+
+    /*
+     * Повышаем роль до EDITOR.
+     */
+    await prisma.folderAccessGrant.update({
+      where: {
+        id: sourceGrant.id,
+      },
+      data: {
+        role: 'EDITOR',
+      },
+    });
+
+    await prisma.folderAccessGrant.create({
+      data: {
+        folderId: destinationFolderId,
+        userId: otherUser.id,
+        role: 'EDITOR',
+      },
+    });
+
+    /*
+     * EDITOR загружает файл в пространство owner.
+     */
+    const uploadedFile = await uploadFile(
+      otherUser.accessToken,
+      'editor-upload.txt',
+      Buffer.from('Uploaded by editor'),
+      sourceFolderId,
+    );
+
+    expect(uploadedFile).toMatchObject({
+      name: 'editor-upload.txt',
+      ownerId: owner.id,
+      folderId: sourceFolderId,
+      status: 'PROCESSING',
+    });
+
+    /*
+     * Physical object тоже должен находиться
+     * в namespace владельца shared tree.
+     */
+    const uploadedMetadata = await prisma.file.findUnique({
+      where: {
+        id: uploadedFile.id,
+      },
+      select: {
+        currentVersion: {
+          select: {
+            storedObject: {
+              select: {
+                objectKey: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!uploadedMetadata?.currentVersion) {
+      throw new Error('Uploaded file version metadata is missing');
+    }
+
+    expect(uploadedMetadata.currentVersion.storedObject.objectKey).toMatch(
+      new RegExp(`^users/${owner.id}/objects/`),
+    );
+
+    /*
+     * EDITOR может rename даже пока
+     * файл находится в PROCESSING.
+     */
+    const renameResponse = await request(app.getHttpServer())
+      .patch(`/files/${uploadedFile.id}`)
+      .set(authorization(otherUser.accessToken))
+      .send({
+        name: 'renamed-by-editor.txt',
+      })
+      .expect(200);
+
+    expect(renameResponse.body).toMatchObject({
+      id: uploadedFile.id,
+      name: 'renamed-by-editor.txt',
+      ownerId: owner.id,
+      folderId: sourceFolderId,
+    });
+
+    /*
+     * Move разрешён только READY file.
+     */
+    await markFileReady(uploadedFile.id);
+
+    const moveResponse = await request(app.getHttpServer())
+      .patch(`/files/${uploadedFile.id}/move`)
+      .set(authorization(otherUser.accessToken))
+      .send({
+        folderId: destinationFolderId,
+      })
+      .expect(200);
+
+    expect(moveResponse.body).toMatchObject({
+      id: uploadedFile.id,
+      ownerId: owner.id,
+      folderId: destinationFolderId,
+    });
+
+    /*
+     * После move EDITOR по destination grant
+     * продолжает видеть файл.
+     */
+    const destinationFiles = await request(app.getHttpServer())
+      .get('/files')
+      .query({
+        folderId: destinationFolderId,
+      })
+      .set(authorization(otherUser.accessToken))
+      .expect(200);
+
+    expect(destinationFiles.body).toEqual([
+      expect.objectContaining({
+        id: uploadedFile.id,
+        ownerId: owner.id,
+        folderId: destinationFolderId,
+      }),
+    ]);
+
+    /*
+     * Но чужой shared file нельзя вынести
+     * в root пользователя-редактора.
+     */
+    await request(app.getHttpServer())
+      .patch(`/files/${uploadedFile.id}/move`)
+      .set(authorization(otherUser.accessToken))
+      .send({
+        folderId: null,
+      })
+      .expect(403);
+
+    /*
+     * Delete всё ещё OWNER-only.
+     */
+    await request(app.getHttpServer())
+      .delete(`/files/${uploadedFile.id}`)
+      .set(authorization(otherUser.accessToken))
+      .expect(404);
+  });
+
+  it('allows EDITOR to use multipart uploads for shared resources', async () => {
+    const sharedFolderId = await createFolder(
+      owner.accessToken,
+      'Shared Multipart Folder',
+    );
+
+    const targetFile = await uploadFile(
+      owner.accessToken,
+      'shared-version-target.txt',
+      Buffer.from('Version one'),
+      sharedFolderId,
+    );
+
+    await markFileReady(targetFile.id);
+
+    const grant = await prisma.folderAccessGrant.create({
+      data: {
+        folderId: sharedFolderId,
+        userId: otherUser.id,
+        role: 'VIEWER',
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    const totalSize = 11 * 1024 * 1024;
+
+    /*
+     * VIEWER не может начать обычную
+     * multipart-загрузку в shared folder.
+     */
+    await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(otherUser.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'viewer-denied.bin',
+        mimeType: 'application/octet-stream',
+        totalSize: totalSize.toString(),
+        folderId: sharedFolderId,
+      })
+      .expect(403);
+
+    /*
+     * VIEWER также не может загружать
+     * multipart-версию существующего файла.
+     */
+    await request(app.getHttpServer())
+      .post(`/files/${targetFile.id}/versions/multipart`)
+      .set(authorization(otherUser.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'viewer-version-denied.bin',
+        mimeType: 'application/octet-stream',
+        totalSize: totalSize.toString(),
+      })
+      .expect(403);
+
+    /*
+     * Повышаем пользователя до EDITOR.
+     */
+    await prisma.folderAccessGrant.update({
+      where: {
+        id: grant.id,
+      },
+      data: {
+        role: 'EDITOR',
+      },
+    });
+
+    /*
+     * Обычная multipart-загрузка
+     * в shared folder.
+     */
+    const uploadRequestId = randomUUID();
+
+    const initiationResponse = await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(otherUser.accessToken))
+      .send({
+        clientRequestId: uploadRequestId,
+        fileName: 'editor-large-file.bin',
+        mimeType: 'application/octet-stream',
+        totalSize: totalSize.toString(),
+        folderId: sharedFolderId,
+      })
+      .expect(201);
+
+    const initiationBody = initiationResponse.body as {
+      id?: unknown;
+    };
+
+    if (typeof initiationBody.id !== 'string') {
+      throw new Error('Multipart upload session ID is missing');
+    }
+
+    const session = await prisma.uploadSession.findUnique({
+      where: {
+        id: initiationBody.id,
+      },
+    });
+
+    if (!session) {
+      throw new Error('Multipart upload session is missing');
+    }
+
+    /*
+     * Session принадлежит EDITOR,
+     * но physical object — owner shared tree.
+     */
+    expect(session).toMatchObject({
+      ownerId: otherUser.id,
+      folderId: sharedFolderId,
+      fileId: null,
+      status: 'UPLOADING',
+    });
+
+    expect(session.objectKey).toMatch(
+      new RegExp(`^users/${owner.id}/objects/`),
+    );
+
+    listMultipartUploadPartsMock.mockResolvedValue([
+      {
+        partNumber: 1,
+        etag: '"shared-editor-etag-1"',
+        size: 8 * 1024 * 1024,
+      },
+      {
+        partNumber: 2,
+        etag: '"shared-editor-etag-2"',
+        size: 3 * 1024 * 1024,
+      },
+    ]);
+
+    getObjectMetadataMock.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      size: totalSize,
+      contentType: 'application/octet-stream',
+    });
+
+    const completeResponse = await request(app.getHttpServer())
+      .post(`/files/multipart/${session.id}/complete`)
+      .set(authorization(otherUser.accessToken))
+      .expect(200);
+
+    const completedFile = completeResponse.body as FileBody;
+
+    expect(completedFile).toMatchObject({
+      name: 'editor-large-file.bin',
+      ownerId: owner.id,
+      folderId: sharedFolderId,
+      status: 'PROCESSING',
+    });
+
+    const completedMetadata = await prisma.file.findUnique({
+      where: {
+        id: completedFile.id,
+      },
+      select: {
+        ownerId: true,
+        currentVersion: {
+          select: {
+            storedObject: {
+              select: {
+                objectKey: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(completedMetadata?.ownerId).toBe(owner.id);
+
+    expect(completedMetadata?.currentVersion?.storedObject.objectKey).toMatch(
+      new RegExp(`^users/${owner.id}/objects/`),
+    );
+
+    /*
+     * Теперь multipart новой версии
+     * существующего shared-файла.
+     */
+    const versionRequestId = randomUUID();
+
+    const versionInitiationResponse = await request(app.getHttpServer())
+      .post(`/files/${targetFile.id}/versions/multipart`)
+      .set(authorization(otherUser.accessToken))
+      .send({
+        clientRequestId: versionRequestId,
+        fileName: 'editor-large-version.bin',
+        mimeType: 'application/octet-stream',
+        totalSize: totalSize.toString(),
+      })
+      .expect(201);
+
+    const versionInitiationBody = versionInitiationResponse.body as {
+      id?: unknown;
+    };
+
+    if (typeof versionInitiationBody.id !== 'string') {
+      throw new Error('Multipart version session ID is missing');
+    }
+
+    const versionSession = await prisma.uploadSession.findUnique({
+      where: {
+        id: versionInitiationBody.id,
+      },
+    });
+
+    if (!versionSession) {
+      throw new Error('Multipart version session is missing');
+    }
+
+    expect(versionSession).toMatchObject({
+      ownerId: otherUser.id,
+      fileId: targetFile.id,
+      folderId: sharedFolderId,
+      status: 'UPLOADING',
+    });
+
+    expect(versionSession.objectKey).toMatch(
+      new RegExp(`^users/${owner.id}/objects/`),
+    );
+
+    listMultipartUploadPartsMock.mockResolvedValue([
+      {
+        partNumber: 1,
+        etag: '"shared-version-etag-1"',
+        size: 8 * 1024 * 1024,
+      },
+      {
+        partNumber: 2,
+        etag: '"shared-version-etag-2"',
+        size: 3 * 1024 * 1024,
+      },
+    ]);
+
+    getObjectMetadataMock.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      size: totalSize,
+      contentType: 'application/octet-stream',
+    });
+
+    const versionCompleteResponse = await request(app.getHttpServer())
+      .post(`/files/multipart/${versionSession.id}/complete`)
+      .set(authorization(otherUser.accessToken))
+      .expect(200);
+
+    expect(versionCompleteResponse.body).toMatchObject({
+      id: targetFile.id,
+      ownerId: owner.id,
+      folderId: sharedFolderId,
+      status: 'PROCESSING',
+    });
+
+    /*
+     * Logical File не поменял owner,
+     * но получил V2.
+     */
+    const versionedFile = await prisma.file.findUnique({
+      where: {
+        id: targetFile.id,
+      },
+      select: {
+        ownerId: true,
+        currentVersionId: true,
+        versions: {
+          orderBy: {
+            versionNumber: 'asc',
+          },
+          select: {
+            id: true,
+            versionNumber: true,
+            storedObject: {
+              select: {
+                objectKey: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(versionedFile?.ownerId).toBe(owner.id);
+
+    expect(
+      versionedFile?.versions.map((version) => version.versionNumber),
+    ).toEqual([1, 2]);
+
+    const secondVersion = versionedFile?.versions[1];
+
+    expect(secondVersion?.id).toBe(versionedFile?.currentVersionId);
+
+    expect(secondVersion?.storedObject.objectKey).toMatch(
+      new RegExp(`^users/${owner.id}/objects/`),
+    );
+  });
+
+  it('restores an old file version as a new version', async () => {
+    const originalContent = Buffer.from('Restore original content');
+    const updatedContent = Buffer.from('Restore updated content');
+
+    const file = await uploadFile(
+      owner.accessToken,
+      'restore-file.txt',
+      originalContent,
+    );
+
+    await markFileReady(file.id);
+
+    await request(app.getHttpServer())
+      .post(`/files/${file.id}/versions`)
+      .set(authorization(owner.accessToken))
+      .attach('file', updatedContent, {
+        filename: 'restore-file-v2.txt',
+        contentType: 'text/plain',
+      })
+      .expect(201);
+
+    await markFileReady(file.id);
+
+    const metadataBeforeRestore = await prisma.file.findUnique({
+      where: {
+        id: file.id,
+      },
+      select: {
+        currentVersionId: true,
+        versions: {
+          orderBy: {
+            versionNumber: 'asc',
+          },
+          select: {
+            id: true,
+            versionNumber: true,
+            originalName: true,
+            mimeType: true,
+            size: true,
+            storedObject: {
+              select: {
+                id: true,
+                referenceCount: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (
+      !metadataBeforeRestore?.currentVersionId ||
+      metadataBeforeRestore.versions.length !== 2
+    ) {
+      throw new Error('File version metadata is missing');
+    }
+
+    const firstVersion = metadataBeforeRestore.versions[0];
+    const secondVersion = metadataBeforeRestore.versions[1];
+
+    if (!firstVersion || !secondVersion) {
+      throw new Error('Expected two file versions');
+    }
+
+    expect(firstVersion).toMatchObject({
+      versionNumber: 1,
+      originalName: 'restore-file.txt',
+      mimeType: 'text/plain',
+      size: BigInt(originalContent.length),
+    });
+
+    expect(secondVersion).toMatchObject({
+      versionNumber: 2,
+      originalName: 'restore-file-v2.txt',
+      mimeType: 'text/plain',
+      size: BigInt(updatedContent.length),
+    });
+
+    expect(metadataBeforeRestore.currentVersionId).toBe(secondVersion.id);
+
+    expect(firstVersion.storedObject.referenceCount).toBe(1);
+    expect(secondVersion.storedObject.referenceCount).toBe(1);
+
+    putObjectMock.mockClear();
+
+    const restoreResponse = await request(app.getHttpServer())
+      .post(`/files/${file.id}/versions/${firstVersion.id}/restore`)
+      .set(authorization(owner.accessToken))
+      .expect(201);
+
+    const restoredFile = restoreResponse.body as FileBody;
+
+    expect(restoredFile).toMatchObject({
+      id: file.id,
+      name: 'restore-file.txt',
+      ownerId: owner.id,
+      folderId: null,
+      status: 'PROCESSING',
+      mimeType: 'text/plain',
+      size: originalContent.length.toString(),
+    });
+
+    /*
+     * Restore reuses the existing StoredObject.
+     * No new bytes should be uploaded to object storage.
+     */
+    expect(putObjectMock).not.toHaveBeenCalled();
+
+    const metadataAfterRestore = await prisma.file.findUnique({
+      where: {
+        id: file.id,
+      },
+      select: {
+        currentVersionId: true,
+        status: true,
+        versions: {
+          orderBy: {
+            versionNumber: 'asc',
+          },
+          select: {
+            id: true,
+            versionNumber: true,
+            originalName: true,
+            mimeType: true,
+            size: true,
+            storedObject: {
+              select: {
+                id: true,
+                referenceCount: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!metadataAfterRestore) {
+      throw new Error('Restored file metadata is missing');
+    }
+
+    expect(metadataAfterRestore.status).toBe('PROCESSING');
+    expect(metadataAfterRestore.versions).toHaveLength(3);
+
+    const restoredFirstVersion = metadataAfterRestore.versions[0];
+    const restoredSecondVersion = metadataAfterRestore.versions[1];
+    const thirdVersion = metadataAfterRestore.versions[2];
+
+    if (!restoredFirstVersion || !restoredSecondVersion || !thirdVersion) {
+      throw new Error('Expected three file versions');
+    }
+
+    /*
+     * Existing history must remain unchanged.
+     */
+    expect(restoredFirstVersion.id).toBe(firstVersion.id);
+    expect(restoredFirstVersion.versionNumber).toBe(1);
+
+    expect(restoredSecondVersion.id).toBe(secondVersion.id);
+    expect(restoredSecondVersion.versionNumber).toBe(2);
+
+    /*
+     * Restore creates a NEW immutable version.
+     */
+    expect(thirdVersion).toMatchObject({
+      versionNumber: 3,
+      originalName: 'restore-file.txt',
+      mimeType: 'text/plain',
+      size: BigInt(originalContent.length),
+    });
+
+    expect(thirdVersion.id).not.toBe(firstVersion.id);
+    expect(thirdVersion.id).not.toBe(secondVersion.id);
+
+    /*
+     * V1 and V3 share the same physical object.
+     */
+    expect(thirdVersion.storedObject.id).toBe(firstVersion.storedObject.id);
+
+    expect(thirdVersion.storedObject.id).not.toBe(
+      secondVersion.storedObject.id,
+    );
+
+    expect(restoredFirstVersion.storedObject.referenceCount).toBe(2);
+    expect(thirdVersion.storedObject.referenceCount).toBe(2);
+
+    expect(metadataAfterRestore.currentVersionId).toBe(thirdVersion.id);
+
+    const outboxEvents = await prisma.outboxEvent.findMany({
+      where: {
+        aggregateId: file.id,
+        type: 'PROCESS_FILE',
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+    });
+
+    expect(outboxEvents).toHaveLength(3);
+
+    expect(outboxEvents[2]?.payload).toMatchObject({
+      fileId: file.id,
+      versionId: thirdVersion.id,
+      storedObjectId: firstVersion.storedObject.id,
+    });
+
+    /*
+     * Another user cannot restore this file.
+     */
+    await request(app.getHttpServer())
+      .post(`/files/${file.id}/versions/${firstVersion.id}/restore`)
+      .set(authorization(otherUser.accessToken))
+      .expect(404);
+
+    /*
+     * After processing finishes, trying to restore the already-current
+     * version must be rejected.
+     */
+    await markFileReady(file.id);
+
+    await request(app.getHttpServer())
+      .post(`/files/${file.id}/versions/${thirdVersion.id}/restore`)
+      .set(authorization(owner.accessToken))
+      .expect(409);
+
+    await request(app.getHttpServer())
+      .post(`/files/not-a-uuid/versions/${firstVersion.id}/restore`)
+      .set(authorization(owner.accessToken))
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post(`/files/${file.id}/versions/not-a-uuid/restore`)
+      .set(authorization(owner.accessToken))
+      .expect(400);
+  });
+
+  it('uses direct file share before inherited folder access', async () => {
+    const targetUser = await prisma.user.findUnique({
+      where: {
+        id: otherUser.id,
+      },
+      select: {
+        email: true,
+      },
+    });
+
+    if (!targetUser) {
+      throw new Error('Target user is missing');
+    }
+
+    const folderId = await createFolder(
+      owner.accessToken,
+      'File Share Override Folder',
+    );
+
+    const file = await uploadFile(
+      owner.accessToken,
+      'shared-override.txt',
+      Buffer.from('Shared override content'),
+      folderId,
+    );
+
+    await markFileReady(file.id);
+
+    /*
+     * Сначала выдаём EDITOR на всю папку.
+     */
+    await request(app.getHttpServer())
+      .post(`/folders/${folderId}/shares`)
+      .set(authorization(owner.accessToken))
+      .send({
+        email: targetUser.email,
+        role: 'EDITOR',
+      })
+      .expect(201);
+
+    /*
+     * Inherited EDITOR позволяет менять файл.
+     */
+    await request(app.getHttpServer())
+      .patch(`/files/${file.id}`)
+      .set(authorization(otherUser.accessToken))
+      .send({
+        name: 'renamed-by-inherited-editor.txt',
+      })
+      .expect(200);
+
+    /*
+     * Теперь OWNER создаёт direct VIEWER
+     * именно на этот файл.
+     */
+    const createShareResponse = await request(app.getHttpServer())
+      .post(`/files/${file.id}/shares`)
+      .set(authorization(owner.accessToken))
+      .send({
+        email: targetUser.email,
+        role: 'VIEWER',
+      })
+      .expect(201);
+
+    const createdShare = createShareResponse.body as {
+      id?: unknown;
+      email?: unknown;
+      role?: unknown;
+    };
+
+    expect(createdShare).toMatchObject({
+      email: targetUser.email,
+      role: 'VIEWER',
+    });
+
+    if (typeof createdShare.id !== 'string') {
+      throw new Error('File share ID is missing');
+    }
+
+    const grantId = createdShare.id;
+
+    /*
+     * Direct VIEWER должен перекрыть
+     * inherited EDITOR.
+     */
+    await request(app.getHttpServer())
+      .patch(`/files/${file.id}`)
+      .set(authorization(otherUser.accessToken))
+      .send({
+        name: 'viewer-must-not-rename.txt',
+      })
+      .expect(403);
+
+    /*
+     * Но read остаётся разрешён.
+     */
+    await request(app.getHttpServer())
+      .get(`/files/${file.id}/download`)
+      .set(authorization(otherUser.accessToken))
+      .expect(200);
+
+    /*
+     * VIEWER/EDITOR не управляют sharing.
+     */
+    await request(app.getHttpServer())
+      .get(`/files/${file.id}/shares`)
+      .set(authorization(otherUser.accessToken))
+      .expect(403);
+
+    /*
+     * OWNER видит direct grant.
+     */
+    const sharesResponse = await request(app.getHttpServer())
+      .get(`/files/${file.id}/shares`)
+      .set(authorization(owner.accessToken))
+      .expect(200);
+
+    expect(sharesResponse.body).toEqual([
+      expect.objectContaining({
+        id: grantId,
+        email: targetUser.email,
+        role: 'VIEWER',
+      }),
+    ]);
+
+    /*
+     * Повторный direct grant запрещён.
+     */
+    await request(app.getHttpServer())
+      .post(`/files/${file.id}/shares`)
+      .set(authorization(owner.accessToken))
+      .send({
+        email: targetUser.email,
+        role: 'EDITOR',
+      })
+      .expect(409);
+
+    /*
+     * OWNER отзывает direct VIEWER.
+     */
+    await request(app.getHttpServer())
+      .delete(`/files/${file.id}/shares/${grantId}`)
+      .set(authorization(owner.accessToken))
+      .expect(204);
+
+    /*
+     * После удаления direct override
+     * снова начинает работать inherited EDITOR.
+     */
+    await request(app.getHttpServer())
+      .patch(`/files/${file.id}`)
+      .set(authorization(otherUser.accessToken))
+      .send({
+        name: 'renamed-after-direct-revoke.txt',
+      })
+      .expect(200);
+
+    const sharesAfterRevoke = await request(app.getHttpServer())
+      .get(`/files/${file.id}/shares`)
+      .set(authorization(owner.accessToken))
+      .expect(200);
+
+    expect(sharesAfterRevoke.body).toEqual([]);
+  });
+
   it('returns an incomplete multipart session to uploading state', async () => {
     const initiationResponse = await request(app.getHttpServer())
       .post('/files/multipart')
@@ -2243,5 +4266,196 @@ describe('Files (e2e)', () => {
       status: 'COMPLETED',
       fileId: recoveredFile.id,
     });
+  });
+
+  it('lists only files shared directly with the current user', async () => {
+    const targetEmail = createTestEmail('files.shared-with-me');
+    const targetUser = await registerAndLogin(targetEmail);
+
+    /*
+     * Direct-shared файл.
+     */
+    const directSharedFile = await uploadFile(
+      owner.accessToken,
+      'direct-shared.txt',
+      Buffer.from('Direct shared content'),
+    );
+
+    await markFileReady(directSharedFile.id);
+
+    /*
+     * Файл, доступный только через shared folder.
+     */
+    const sharedFolderId = await createFolder(
+      owner.accessToken,
+      'Inherited Shared Folder',
+    );
+
+    const inheritedFile = await uploadFile(
+      owner.accessToken,
+      'inherited-file.txt',
+      Buffer.from('Inherited content'),
+      sharedFolderId,
+    );
+
+    await markFileReady(inheritedFile.id);
+
+    /*
+     * Собственный файл targetUser тоже не должен
+     * попадать в Shared with me.
+     */
+    const ownFile = await uploadFile(
+      targetUser.accessToken,
+      'own-target-file.txt',
+      Buffer.from('Own content'),
+    );
+
+    await markFileReady(ownFile.id);
+
+    /*
+     * Пока direct grants нет — discovery пуст.
+     */
+    const emptyResponse = await request(app.getHttpServer())
+      .get('/files/shared-with-me')
+      .set(authorization(targetUser.accessToken))
+      .expect(200);
+
+    expect(emptyResponse.body).toEqual([]);
+
+    /*
+     * Даём EDITOR на папку.
+     * inheritedFile становится доступен,
+     * но direct file discovery меняться не должен.
+     */
+    await request(app.getHttpServer())
+      .post(`/folders/${sharedFolderId}/shares`)
+      .set(authorization(owner.accessToken))
+      .send({
+        email: targetEmail,
+        role: 'EDITOR',
+      })
+      .expect(201);
+
+    const inheritedOnlyResponse = await request(app.getHttpServer())
+      .get('/files/shared-with-me')
+      .set(authorization(targetUser.accessToken))
+      .expect(200);
+
+    expect(inheritedOnlyResponse.body).toEqual([]);
+
+    /*
+     * При этом inherited файл реально доступен.
+     */
+    const folderFilesResponse = await request(app.getHttpServer())
+      .get('/files')
+      .query({
+        folderId: sharedFolderId,
+      })
+      .set(authorization(targetUser.accessToken))
+      .expect(200);
+
+    expect(folderFilesResponse.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: inheritedFile.id,
+        }),
+      ]),
+    );
+
+    /*
+     * Теперь создаём direct FileAccessGrant.
+     */
+    const shareResponse = await request(app.getHttpServer())
+      .post(`/files/${directSharedFile.id}/shares`)
+      .set(authorization(owner.accessToken))
+      .send({
+        email: targetEmail,
+        role: 'VIEWER',
+      })
+      .expect(201);
+
+    const share = shareResponse.body as {
+      id?: unknown;
+      role?: unknown;
+    };
+
+    expect(share.role).toBe('VIEWER');
+
+    if (typeof share.id !== 'string') {
+      throw new Error('File share ID is missing');
+    }
+
+    /*
+     * В discovery теперь должен быть ровно
+     * один direct-shared файл.
+     */
+    const response = await request(app.getHttpServer())
+      .get('/files/shared-with-me')
+      .set(authorization(targetUser.accessToken))
+      .expect(200);
+
+    const body = response.body as Array<{
+      id?: unknown;
+      name?: unknown;
+      ownerId?: unknown;
+      folderId?: unknown;
+      status?: unknown;
+      mimeType?: unknown;
+      size?: unknown;
+      role?: unknown;
+      sharedAt?: unknown;
+      createdAt?: unknown;
+      updatedAt?: unknown;
+    }>;
+
+    expect(body).toHaveLength(1);
+
+    expect(body[0]).toMatchObject({
+      id: directSharedFile.id,
+      name: 'direct-shared.txt',
+      ownerId: owner.id,
+      folderId: null,
+      status: 'READY',
+      mimeType: 'text/plain',
+      size: Buffer.byteLength('Direct shared content').toString(),
+      role: 'VIEWER',
+    });
+
+    expect(typeof body[0]?.sharedAt).toBe('string');
+    expect(typeof body[0]?.createdAt).toBe('string');
+    expect(typeof body[0]?.updatedAt).toBe('string');
+
+    /*
+     * Inherited и собственный файл
+     * отсутствуют в discovery.
+     */
+    expect(body.some((file) => file.id === inheritedFile.id)).toBe(false);
+
+    expect(body.some((file) => file.id === ownFile.id)).toBe(false);
+
+    /*
+     * После revoke direct grant файл исчезает
+     * из Shared with me.
+     */
+    await request(app.getHttpServer())
+      .delete(`/files/${directSharedFile.id}/shares/${share.id}`)
+      .set(authorization(owner.accessToken))
+      .expect(204);
+
+    const afterRevokeResponse = await request(app.getHttpServer())
+      .get('/files/shared-with-me')
+      .set(authorization(targetUser.accessToken))
+      .expect(200);
+
+    expect(afterRevokeResponse.body).toEqual([]);
+
+    /*
+     * Inherited доступ через папку при этом
+     * по-прежнему существует.
+     */
+    await request(app.getHttpServer())
+      .get(`/files/${inheritedFile.id}/download`)
+      .set(authorization(targetUser.accessToken))
+      .expect(200);
   });
 });

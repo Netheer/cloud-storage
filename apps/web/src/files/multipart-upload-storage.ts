@@ -6,29 +6,53 @@ export interface PersistedMultipartUpload {
   fileType: string;
   lastModified: number;
   folderId: string | null;
+  targetFileId: string | null;
 }
 
-const STORAGE_PREFIX =
-  'cloud-storage:multipart-upload:v1';
+const STORAGE_KEY_PREFIX =
+  'cloud-storage:multipart-upload:v1:';
 
 function getStorageKey(
   file: File,
   folderId: string | null,
+  targetFileId: string | null = null,
 ): string {
-  const fingerprint = JSON.stringify([
-    file.name,
-    file.size,
-    file.type,
-    file.lastModified,
-    folderId,
-  ]);
+  /*
+   * Для обычных загрузок сохраняем старый fingerprint.
+   * Это позволяет не ломать уже существующее
+   * resume-состояние Stage 3.
+   */
+  const fingerprint =
+    targetFileId === null
+      ? [
+          file.name,
+          file.size,
+          file.type,
+          file.lastModified,
+          folderId,
+        ]
+      : [
+          'version',
+          targetFileId,
+          file.name,
+          file.size,
+          file.type,
+          file.lastModified,
+        ];
 
-  return `${STORAGE_PREFIX}:${encodeURIComponent(fingerprint)}`;
+  return `${STORAGE_KEY_PREFIX}${encodeURIComponent(
+    JSON.stringify(fingerprint),
+  )}`;
 }
 
 function isPersistedMultipartUpload(
   value: unknown,
-): value is PersistedMultipartUpload {
+): value is Omit<
+  PersistedMultipartUpload,
+  'targetFileId'
+> & {
+  targetFileId?: string | null;
+} {
   if (
     typeof value !== 'object' ||
     value === null
@@ -36,28 +60,28 @@ function isPersistedMultipartUpload(
     return false;
   }
 
-  const record = value as Record<string, unknown>;
+  const upload = value as Record<string, unknown>;
 
   return (
-    typeof record.clientRequestId === 'string' &&
-    (
-      typeof record.sessionId === 'string' ||
-      record.sessionId === null
-    ) &&
-    typeof record.fileName === 'string' &&
-    typeof record.fileSize === 'number' &&
-    typeof record.fileType === 'string' &&
-    typeof record.lastModified === 'number' &&
-    (
-      typeof record.folderId === 'string' ||
-      record.folderId === null
-    )
+    typeof upload.clientRequestId === 'string' &&
+    (upload.sessionId === null ||
+      typeof upload.sessionId === 'string') &&
+    typeof upload.fileName === 'string' &&
+    typeof upload.fileSize === 'number' &&
+    typeof upload.fileType === 'string' &&
+    typeof upload.lastModified === 'number' &&
+    (upload.folderId === null ||
+      typeof upload.folderId === 'string') &&
+    (upload.targetFileId === undefined ||
+      upload.targetFileId === null ||
+      typeof upload.targetFileId === 'string')
   );
 }
 
 export function createPersistedMultipartUpload(
   file: File,
   folderId: string | null,
+  targetFileId: string | null = null,
 ): PersistedMultipartUpload {
   return {
     clientRequestId: crypto.randomUUID(),
@@ -67,40 +91,56 @@ export function createPersistedMultipartUpload(
     fileType: file.type,
     lastModified: file.lastModified,
     folderId,
+    targetFileId,
   };
 }
 
 export function getPersistedMultipartUpload(
   file: File,
   folderId: string | null,
+  targetFileId: string | null = null,
 ): PersistedMultipartUpload | null {
-  const rawValue = localStorage.getItem(
-    getStorageKey(file, folderId),
+  const storageKey = getStorageKey(
+    file,
+    folderId,
+    targetFileId,
   );
 
-  if (!rawValue) {
+  const storedValue =
+    window.localStorage.getItem(storageKey);
+
+  if (!storedValue) {
     return null;
   }
 
   try {
-    const value = JSON.parse(rawValue) as unknown;
+    const parsed = JSON.parse(storedValue) as unknown;
 
-    if (!isPersistedMultipartUpload(value)) {
-      removePersistedMultipartUpload(
-        file,
-        folderId,
-      );
-
+    if (!isPersistedMultipartUpload(parsed)) {
+      window.localStorage.removeItem(storageKey);
       return null;
     }
 
-    return value;
-  } catch {
-    removePersistedMultipartUpload(
-      file,
-      folderId,
-    );
+    const normalized: PersistedMultipartUpload = {
+      ...parsed,
+      targetFileId:
+        parsed.targetFileId ?? null,
+    };
 
+    /*
+     * Дополнительная защита от использования локальной
+     * записи не для того типа загрузки.
+     */
+    if (
+      normalized.targetFileId !== targetFileId
+    ) {
+      window.localStorage.removeItem(storageKey);
+      return null;
+    }
+
+    return normalized;
+  } catch {
+    window.localStorage.removeItem(storageKey);
     return null;
   }
 }
@@ -109,9 +149,17 @@ export function savePersistedMultipartUpload(
   file: File,
   folderId: string | null,
   upload: PersistedMultipartUpload,
+  targetFileId: string | null =
+    upload.targetFileId,
 ): void {
-  localStorage.setItem(
-    getStorageKey(file, folderId),
+  const storageKey = getStorageKey(
+    file,
+    folderId,
+    targetFileId,
+  );
+
+  window.localStorage.setItem(
+    storageKey,
     JSON.stringify(upload),
   );
 }
@@ -119,8 +167,13 @@ export function savePersistedMultipartUpload(
 export function removePersistedMultipartUpload(
   file: File,
   folderId: string | null,
+  targetFileId: string | null = null,
 ): void {
-  localStorage.removeItem(
-    getStorageKey(file, folderId),
+  window.localStorage.removeItem(
+    getStorageKey(
+      file,
+      folderId,
+      targetFileId,
+    ),
   );
 }

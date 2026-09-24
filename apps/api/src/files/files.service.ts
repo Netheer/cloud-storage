@@ -8,6 +8,7 @@ import {
   NotFoundException,
   ServiceUnavailableException,
   GoneException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../database/prisma.service';
@@ -16,6 +17,7 @@ import {
   type MultipartUploadPart,
   type ObjectStorage,
 } from '../storage/object-storage.interface';
+import { AccessService } from '../access/access.service';
 import type { PreviewFileResponseDto } from './dto/preview-file-response.dto';
 import type {
   MultipartUploadedPartResponseDto,
@@ -29,6 +31,7 @@ import type { DownloadFileResponseDto } from './dto/download-file-response.dto';
 import type { FileResponseDto } from './dto/file-response.dto';
 import type { UploadFileDto } from './dto/upload-file.dto';
 import type { MoveFileDto } from './dto/move-file.dto';
+import type { FileVersionResponseDto } from './dto/file-version-response.dto';
 
 const SIMPLE_UPLOAD_MAX_SIZE_BYTES = 10n * 1024n * 1024n;
 const MULTIPART_UPLOAD_PART_SIZE_BYTES = 8n * 1024n * 1024n;
@@ -111,7 +114,7 @@ type FileRecord = {
 };
 
 type FinalizeMultipartUploadInput = {
-  ownerId: string;
+  resourceOwnerId: string;
   uploadSessionId: string;
   folderId: string | null;
   objectKey: string;
@@ -126,23 +129,41 @@ export class FilesService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly accessService: AccessService,
     @Inject(OBJECT_STORAGE)
     private readonly objectStorage: ObjectStorage,
   ) {}
 
   async upload(
-    ownerId: string,
+    userId: string,
     file: Express.Multer.File,
     dto: UploadFileDto,
   ): Promise<FileResponseDto> {
     const folderId = dto.folderId ?? null;
     const fileName = this.normalizeFileName(file.originalname);
 
+    let fileOwnerId = userId;
+
     if (folderId) {
-      await this.ensureOwnedFolderExists(ownerId, folderId);
+      await this.accessService.requireFolderRole(userId, folderId, 'EDITOR');
+
+      const folder = await this.prisma.folder.findUnique({
+        where: {
+          id: folderId,
+        },
+        select: {
+          ownerId: true,
+        },
+      });
+
+      if (!folder) {
+        throw new NotFoundException('Folder not found');
+      }
+
+      fileOwnerId = folder.ownerId;
     }
 
-    const objectKey = `users/${ownerId}/objects/${randomUUID()}`;
+    const objectKey = `users/${fileOwnerId}/objects/${randomUUID()}`;
 
     const mimeType = file.mimetype.trim() || null;
 
@@ -159,7 +180,7 @@ export class FilesService {
         const fileMetadata = await transaction.file.create({
           data: {
             name: fileName,
-            ownerId,
+            ownerId: fileOwnerId,
             folderId,
             status: 'UPLOADING',
           },
@@ -220,23 +241,237 @@ export class FilesService {
       });
     } catch (error: unknown) {
       await this.removeOrphanedObject(objectKey);
+
       throw error;
     }
 
     return this.toResponseDto(createdFile);
   }
 
+  async uploadVersion(
+    userId: string,
+    fileId: string,
+    file: Express.Multer.File,
+  ): Promise<FileResponseDto> {
+    await this.accessService.requireFileRole(userId, fileId, 'EDITOR');
+
+    const fileName = this.normalizeFileName(file.originalname);
+    const mimeType = file.mimetype.trim() || null;
+
+    const existingFile = await this.prisma.file.findFirst({
+      where: {
+        id: fileId,
+        deletedAt: null,
+      },
+      select: {
+        ownerId: true,
+        status: true,
+      },
+    });
+
+    if (!existingFile) {
+      throw new NotFoundException('File not found');
+    }
+
+    if (existingFile.status !== 'READY') {
+      throw new ConflictException('File is not ready to accept a new version');
+    }
+
+    /*
+     * Новая версия физически хранится
+     * в namespace владельца logical File,
+     * а не пользователя-редактора.
+     */
+    const fileOwnerId = existingFile.ownerId;
+
+    const objectKey = `users/${fileOwnerId}/objects/${randomUUID()}`;
+
+    await this.objectStorage.putObject({
+      objectKey,
+      body: file.buffer,
+      contentType: mimeType ?? undefined,
+    });
+
+    let updatedFile: FileRecord;
+
+    try {
+      updatedFile = await this.prisma.$transaction(async (transaction) => {
+        /*
+         * Lock нужен для безопасного вычисления
+         * следующего versionNumber.
+         */
+        const lockedFiles = await transaction.$queryRaw<Array<{ id: string }>>`
+              SELECT "id"
+              FROM "File"
+              WHERE "id" = ${fileId}::uuid
+                AND "ownerId" = ${fileOwnerId}::uuid
+                AND "deletedAt" IS NULL
+              FOR UPDATE
+            `;
+
+        if (lockedFiles.length === 0) {
+          throw new NotFoundException('File not found');
+        }
+
+        const currentFile = await transaction.file.findUnique({
+          where: {
+            id: fileId,
+          },
+          select: {
+            status: true,
+            versions: {
+              orderBy: {
+                versionNumber: 'desc',
+              },
+              take: 1,
+              select: {
+                versionNumber: true,
+              },
+            },
+          },
+        });
+
+        if (!currentFile) {
+          throw new NotFoundException('File not found');
+        }
+
+        if (currentFile.status !== 'READY') {
+          throw new ConflictException(
+            'File is not ready to accept a new version',
+          );
+        }
+
+        const nextVersionNumber =
+          (currentFile.versions[0]?.versionNumber ?? 0) + 1;
+
+        const storedObject = await transaction.storedObject.create({
+          data: {
+            objectKey,
+            size: BigInt(file.size),
+            referenceCount: 1,
+          },
+          select: {
+            id: true,
+          },
+        });
+
+        const version = await transaction.fileVersion.create({
+          data: {
+            fileId,
+            storedObjectId: storedObject.id,
+            versionNumber: nextVersionNumber,
+            originalName: fileName,
+            mimeType,
+            size: BigInt(file.size),
+          },
+          select: {
+            id: true,
+          },
+        });
+
+        const processingFile = await transaction.file.update({
+          where: {
+            id: fileId,
+          },
+          data: {
+            currentVersionId: version.id,
+            status: 'PROCESSING',
+          },
+          select: FILE_SELECT,
+        });
+
+        await transaction.outboxEvent.create({
+          data: {
+            type: PROCESS_FILE_OUTBOX_EVENT_TYPE,
+            aggregateId: fileId,
+            payload: {
+              fileId,
+              versionId: version.id,
+              storedObjectId: storedObject.id,
+            },
+          },
+        });
+
+        return processingFile;
+      });
+    } catch (error: unknown) {
+      await this.removeOrphanedObject(objectKey);
+
+      throw error;
+    }
+
+    return this.toResponseDto(updatedFile);
+  }
+
   async initiateMultipartUpload(
-    ownerId: string,
+    userId: string,
     dto: InitiateMultipartUploadDto,
+    targetFileId?: string,
   ): Promise<MultipartUploadSessionResponseDto> {
-    const folderId = dto.folderId ?? null;
+    let folderId = dto.folderId ?? null;
+    let resourceOwnerId = userId;
+
     const originalName = this.normalizeFileName(dto.fileName);
     const mimeType = this.normalizeMimeType(dto.mimeType);
     const totalSize = this.parseMultipartTotalSize(dto.totalSize);
 
-    if (folderId) {
-      await this.ensureOwnedFolderExists(ownerId, folderId);
+    /*
+     * Multipart новой версии.
+     */
+    if (targetFileId) {
+      if (dto.folderId !== undefined) {
+        throw new BadRequestException(
+          'folderId is not allowed when uploading a new file version',
+        );
+      }
+
+      await this.accessService.requireFileRole(userId, targetFileId, 'EDITOR');
+
+      const targetFile = await this.prisma.file.findFirst({
+        where: {
+          id: targetFileId,
+          deletedAt: null,
+        },
+        select: {
+          ownerId: true,
+          folderId: true,
+          status: true,
+        },
+      });
+
+      if (!targetFile) {
+        throw new NotFoundException('File not found');
+      }
+
+      if (targetFile.status !== 'READY') {
+        throw new ConflictException(
+          'File is not ready to accept a new version',
+        );
+      }
+
+      folderId = targetFile.folderId;
+      resourceOwnerId = targetFile.ownerId;
+    } else if (folderId) {
+      /*
+       * Обычный multipart upload
+       * внутрь shared folder.
+       */
+      await this.accessService.requireFolderRole(userId, folderId, 'EDITOR');
+
+      const folder = await this.prisma.folder.findUnique({
+        where: {
+          id: folderId,
+        },
+        select: {
+          ownerId: true,
+        },
+      });
+
+      if (!folder) {
+        throw new NotFoundException('Folder not found');
+      }
+
+      resourceOwnerId = folder.ownerId;
     }
 
     const partSize = MULTIPART_UPLOAD_PART_SIZE_BYTES;
@@ -248,18 +483,19 @@ export class FilesService {
       );
     }
 
-    const candidateObjectKey = `users/${ownerId}/objects/${randomUUID()}`;
+    const candidateObjectKey = `users/${resourceOwnerId}/objects/${randomUUID()}`;
 
     const session = await this.prisma.uploadSession.upsert({
       where: {
         ownerId_clientRequestId: {
-          ownerId,
+          ownerId: userId,
           clientRequestId: dto.clientRequestId,
         },
       },
       create: {
-        ownerId,
+        ownerId: userId,
         folderId,
+        fileId: targetFileId ?? null,
         clientRequestId: dto.clientRequestId,
         objectKey: candidateObjectKey,
         originalName,
@@ -278,6 +514,7 @@ export class FilesService {
       session.originalName === originalName &&
       session.mimeType === mimeType &&
       session.folderId === folderId &&
+      session.fileId === (targetFileId ?? null) &&
       session.totalSize === totalSize;
 
     if (!requestMatchesSession) {
@@ -535,6 +772,12 @@ export class FilesService {
       throw new NotFoundException('Multipart upload session not found');
     }
 
+    const resourceOwnerId = await this.resolveMultipartResourceOwnerId(
+      ownerId,
+      session.fileId,
+      session.folderId,
+    );
+
     if (session.status === 'COMPLETED') {
       if (!session.fileId) {
         throw new InternalServerErrorException(
@@ -542,7 +785,7 @@ export class FilesService {
         );
       }
 
-      return this.getCompletedMultipartFile(ownerId, session.fileId);
+      return this.getCompletedMultipartFile(session.fileId);
     }
 
     if (session.status === 'EXPIRED') {
@@ -614,7 +857,7 @@ export class FilesService {
         });
 
         if (currentSession?.status === 'COMPLETED' && currentSession.fileId) {
-          return this.getCompletedMultipartFile(ownerId, currentSession.fileId);
+          return this.getCompletedMultipartFile(currentSession.fileId);
         }
 
         throw new ConflictException(
@@ -631,7 +874,7 @@ export class FilesService {
       this.ensureCompletedObjectSize(existingObject.size, session.totalSize);
 
       return this.finalizeMultipartUploadMetadata({
-        ownerId,
+        resourceOwnerId,
         uploadSessionId: session.id,
         folderId: session.folderId,
         objectKey: session.objectKey,
@@ -704,7 +947,7 @@ export class FilesService {
     this.ensureCompletedObjectSize(completedObject.size, session.totalSize);
 
     return this.finalizeMultipartUploadMetadata({
-      ownerId,
+      resourceOwnerId,
       uploadSessionId: session.id,
       folderId: session.folderId,
       objectKey: session.objectKey,
@@ -850,17 +1093,36 @@ export class FilesService {
     });
   }
 
-  async list(ownerId: string, folderId?: string): Promise<FileResponseDto[]> {
-    const normalizedFolderId = folderId ?? null;
-
+  async list(userId: string, folderId?: string): Promise<FileResponseDto[]> {
     if (folderId) {
-      await this.ensureOwnedFolderExists(ownerId, folderId);
+      await this.accessService.requireFolderRole(userId, folderId, 'VIEWER');
+
+      const files = await this.prisma.file.findMany({
+        where: {
+          folderId,
+          status: {
+            in: ['PROCESSING', 'READY', 'FAILED'],
+          },
+          deletedAt: null,
+        },
+        orderBy: [
+          {
+            name: 'asc',
+          },
+          {
+            createdAt: 'asc',
+          },
+        ],
+        select: FILE_SELECT,
+      });
+
+      return files.map((file) => this.toResponseDto(file));
     }
 
     const files = await this.prisma.file.findMany({
       where: {
-        ownerId,
-        folderId: normalizedFolderId,
+        ownerId: userId,
+        folderId: null,
         status: {
           in: ['PROCESSING', 'READY', 'FAILED'],
         },
@@ -880,14 +1142,254 @@ export class FilesService {
     return files.map((file) => this.toResponseDto(file));
   }
 
-  async createDownloadUrl(
-    ownerId: string,
+  async listVersions(
+    userId: string,
     fileId: string,
-  ): Promise<DownloadFileResponseDto> {
+  ): Promise<FileVersionResponseDto[]> {
+    await this.accessService.requireFileRole(userId, fileId, 'VIEWER');
+
     const file = await this.prisma.file.findFirst({
       where: {
         id: fileId,
-        ownerId,
+        status: {
+          in: ['PROCESSING', 'READY', 'FAILED'],
+        },
+        deletedAt: null,
+      },
+      select: {
+        currentVersionId: true,
+        versions: {
+          orderBy: {
+            versionNumber: 'desc',
+          },
+          select: {
+            id: true,
+            versionNumber: true,
+            originalName: true,
+            mimeType: true,
+            size: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+
+    if (!file) {
+      throw new NotFoundException('File not found');
+    }
+
+    return file.versions.map((version) => ({
+      id: version.id,
+      versionNumber: version.versionNumber,
+      originalName: version.originalName,
+      mimeType: version.mimeType,
+      size: version.size.toString(),
+      createdAt: version.createdAt,
+      isCurrent: version.id === file.currentVersionId,
+    }));
+  }
+
+  async createVersionDownloadUrl(
+    userId: string,
+    fileId: string,
+    versionId: string,
+  ): Promise<DownloadFileResponseDto> {
+    await this.accessService.requireFileRole(userId, fileId, 'VIEWER');
+
+    const version = await this.prisma.fileVersion.findFirst({
+      where: {
+        id: versionId,
+        fileId,
+        file: {
+          deletedAt: null,
+        },
+      },
+      select: {
+        originalName: true,
+        mimeType: true,
+        storedObject: {
+          select: {
+            objectKey: true,
+          },
+        },
+      },
+    });
+
+    if (!version) {
+      throw new NotFoundException('File version not found');
+    }
+
+    const expiresInSeconds = 10 * 60;
+
+    const url = await this.objectStorage.createPresignedDownloadUrl({
+      objectKey: version.storedObject.objectKey,
+      downloadFileName: version.originalName,
+      contentType: version.mimeType ?? undefined,
+      expiresInSeconds,
+    });
+
+    return {
+      url,
+      expiresAt: new Date(Date.now() + expiresInSeconds * 1000),
+    };
+  }
+
+  async restoreVersion(
+    userId: string,
+    fileId: string,
+    versionId: string,
+  ): Promise<FileResponseDto> {
+    await this.accessService.requireFileRole(userId, fileId, 'EDITOR');
+
+    const restoredFile = await this.prisma.$transaction(async (transaction) => {
+      /*
+       * Блокируем logical File, чтобы одновременно
+       * не вычислить одинаковый versionNumber.
+       */
+      const lockedFiles = await transaction.$queryRaw<Array<{ id: string }>>`
+            SELECT "id"
+            FROM "File"
+            WHERE "id" = ${fileId}::uuid
+              AND "deletedAt" IS NULL
+            FOR UPDATE
+          `;
+
+      if (lockedFiles.length === 0) {
+        throw new NotFoundException('File not found');
+      }
+
+      const currentFile = await transaction.file.findUnique({
+        where: {
+          id: fileId,
+        },
+        select: {
+          status: true,
+          currentVersionId: true,
+          versions: {
+            orderBy: {
+              versionNumber: 'desc',
+            },
+            take: 1,
+            select: {
+              versionNumber: true,
+            },
+          },
+        },
+      });
+
+      if (!currentFile) {
+        throw new NotFoundException('File not found');
+      }
+
+      if (currentFile.status !== 'READY') {
+        throw new ConflictException('File is not ready to restore a version');
+      }
+
+      /*
+       * Текущую версию восстанавливать бессмысленно.
+       */
+      if (currentFile.currentVersionId === versionId) {
+        throw new ConflictException('Selected version is already current');
+      }
+
+      /*
+       * Source version обязательно должна
+       * принадлежать этому logical File.
+       */
+      const sourceVersion = await transaction.fileVersion.findFirst({
+        where: {
+          id: versionId,
+          fileId,
+        },
+        select: {
+          storedObjectId: true,
+          originalName: true,
+          mimeType: true,
+          size: true,
+        },
+      });
+
+      if (!sourceVersion) {
+        throw new NotFoundException('File version not found');
+      }
+
+      const nextVersionNumber =
+        (currentFile.versions[0]?.versionNumber ?? 0) + 1;
+
+      /*
+       * Restore не копирует physical object.
+       * Новая версия ссылается на тот же
+       * StoredObject.
+       */
+      await transaction.storedObject.update({
+        where: {
+          id: sourceVersion.storedObjectId,
+        },
+        data: {
+          referenceCount: {
+            increment: 1,
+          },
+        },
+      });
+
+      const restoredVersion = await transaction.fileVersion.create({
+        data: {
+          fileId,
+          storedObjectId: sourceVersion.storedObjectId,
+          versionNumber: nextVersionNumber,
+          originalName: sourceVersion.originalName,
+          mimeType: sourceVersion.mimeType,
+          size: sourceVersion.size,
+
+          /*
+           * Preview намеренно не копируем.
+           * Worker создаст новый preview
+           * для новой immutable версии.
+           */
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      const processingFile = await transaction.file.update({
+        where: {
+          id: fileId,
+        },
+        data: {
+          currentVersionId: restoredVersion.id,
+          status: 'PROCESSING',
+        },
+        select: FILE_SELECT,
+      });
+
+      await transaction.outboxEvent.create({
+        data: {
+          type: PROCESS_FILE_OUTBOX_EVENT_TYPE,
+          aggregateId: fileId,
+          payload: {
+            fileId,
+            versionId: restoredVersion.id,
+            storedObjectId: sourceVersion.storedObjectId,
+          },
+        },
+      });
+
+      return processingFile;
+    });
+
+    return this.toResponseDto(restoredFile);
+  }
+
+  async createDownloadUrl(
+    userId: string,
+    fileId: string,
+  ): Promise<DownloadFileResponseDto> {
+    await this.accessService.requireFileRole(userId, fileId, 'VIEWER');
+
+    const file = await this.prisma.file.findFirst({
+      where: {
+        id: fileId,
         status: 'READY',
         deletedAt: null,
       },
@@ -930,13 +1432,14 @@ export class FilesService {
   }
 
   async createPreviewUrl(
-    ownerId: string,
+    userId: string,
     fileId: string,
   ): Promise<PreviewFileResponseDto> {
+    await this.accessService.requireFileRole(userId, fileId, 'VIEWER');
+
     const file = await this.prisma.file.findFirst({
       where: {
         id: fileId,
-        ownerId,
         status: 'READY',
         deletedAt: null,
       },
@@ -992,14 +1495,15 @@ export class FilesService {
   }
 
   async rename(
-    ownerId: string,
+    userId: string,
     fileId: string,
     dto: RenameFileDto,
   ): Promise<FileResponseDto> {
+    await this.accessService.requireFileRole(userId, fileId, 'EDITOR');
+
     const file = await this.prisma.file.findFirst({
       where: {
         id: fileId,
-        ownerId,
         status: {
           in: ['PROCESSING', 'READY', 'FAILED'],
         },
@@ -1030,19 +1534,21 @@ export class FilesService {
   }
 
   async move(
-    ownerId: string,
+    userId: string,
     fileId: string,
     dto: MoveFileDto,
   ): Promise<FileResponseDto> {
+    await this.accessService.requireFileRole(userId, fileId, 'EDITOR');
+
     const file = await this.prisma.file.findFirst({
       where: {
         id: fileId,
-        ownerId,
         status: 'READY',
         deletedAt: null,
       },
       select: {
         id: true,
+        ownerId: true,
       },
     });
 
@@ -1050,8 +1556,54 @@ export class FilesService {
       throw new NotFoundException('File not found');
     }
 
-    if (dto.folderId !== null) {
-      await this.ensureOwnedFolderExists(ownerId, dto.folderId);
+    /*
+     * В root чужой File может вынести
+     * только его владелец.
+     */
+    if (dto.folderId === null) {
+      if (file.ownerId !== userId) {
+        throw new ForbiddenException('Only the owner can move a file to root');
+      }
+
+      const movedFile = await this.prisma.file.update({
+        where: {
+          id: file.id,
+        },
+        data: {
+          folderId: null,
+        },
+        select: FILE_SELECT,
+      });
+
+      return this.toResponseDto(movedFile);
+    }
+
+    /*
+     * Для destination требуется EDITOR.
+     */
+    await this.accessService.requireFolderRole(userId, dto.folderId, 'EDITOR');
+
+    const destinationFolder = await this.prisma.folder.findUnique({
+      where: {
+        id: dto.folderId,
+      },
+      select: {
+        ownerId: true,
+      },
+    });
+
+    if (!destinationFolder) {
+      throw new NotFoundException('Destination folder not found');
+    }
+
+    /*
+     * Файл нельзя перенести из пространства
+     * одного владельца в пространство другого.
+     */
+    if (destinationFolder.ownerId !== file.ownerId) {
+      throw new BadRequestException(
+        'File and destination folder must have the same owner',
+      );
     }
 
     const movedFile = await this.prisma.file.update({
@@ -1079,13 +1631,14 @@ export class FilesService {
       select: {
         id: true,
         status: true,
-        currentVersion: {
+        versions: {
           select: {
             previewObjectKey: true,
             storedObject: {
               select: {
                 id: true,
                 objectKey: true,
+                referenceCount: true,
                 _count: {
                   select: {
                     versions: true,
@@ -1102,7 +1655,7 @@ export class FilesService {
       throw new NotFoundException('File not found');
     }
 
-    if (!file.currentVersion) {
+    if (file.versions.length === 0) {
       throw new InternalServerErrorException('File metadata is incomplete');
     }
 
@@ -1118,12 +1671,15 @@ export class FilesService {
       });
     }
 
-    const storedObject = file.currentVersion.storedObject;
-    const shouldDeleteStoredObject = storedObject._count.versions === 1;
+    const previewObjectKeys = [
+      ...new Set(
+        file.versions
+          .map((version) => version.previewObjectKey)
+          .filter((objectKey): objectKey is string => objectKey !== null),
+      ),
+    ];
 
-    const previewObjectKey = file.currentVersion.previewObjectKey;
-
-    if (previewObjectKey) {
+    for (const previewObjectKey of previewObjectKeys) {
       try {
         await this.objectStorage.deleteObject(previewObjectKey);
       } catch {
@@ -1133,7 +1689,45 @@ export class FilesService {
       }
     }
 
-    if (shouldDeleteStoredObject) {
+    const storedObjects = new Map<
+      string,
+      {
+        id: string;
+        objectKey: string;
+        referenceCount: number;
+        totalVersionReferences: number;
+        fileVersionReferences: number;
+      }
+    >();
+
+    for (const version of file.versions) {
+      const storedObject = version.storedObject;
+
+      const existing = storedObjects.get(storedObject.id);
+
+      if (existing) {
+        existing.fileVersionReferences += 1;
+        continue;
+      }
+
+      storedObjects.set(storedObject.id, {
+        id: storedObject.id,
+        objectKey: storedObject.objectKey,
+        referenceCount: storedObject.referenceCount,
+        totalVersionReferences: storedObject._count.versions,
+        fileVersionReferences: 1,
+      });
+    }
+
+    for (const storedObject of storedObjects.values()) {
+      const shouldDeleteStoredObject =
+        storedObject.totalVersionReferences ===
+        storedObject.fileVersionReferences;
+
+      if (!shouldDeleteStoredObject) {
+        continue;
+      }
+
       try {
         await this.objectStorage.deleteObject(storedObject.objectKey);
       } catch {
@@ -1156,29 +1750,35 @@ export class FilesService {
         return;
       }
 
-      if (shouldDeleteStoredObject) {
-        await transaction.storedObject.deleteMany({
+      for (const storedObject of storedObjects.values()) {
+        const shouldDeleteStoredObject =
+          storedObject.totalVersionReferences ===
+          storedObject.fileVersionReferences;
+
+        if (shouldDeleteStoredObject) {
+          await transaction.storedObject.deleteMany({
+            where: {
+              id: storedObject.id,
+              versions: {
+                none: {},
+              },
+            },
+          });
+
+          continue;
+        }
+
+        await transaction.storedObject.update({
           where: {
             id: storedObject.id,
-            versions: {
-              none: {},
+          },
+          data: {
+            referenceCount: {
+              decrement: storedObject.fileVersionReferences,
             },
           },
         });
-
-        return;
       }
-
-      await transaction.storedObject.update({
-        where: {
-          id: storedObject.id,
-        },
-        data: {
-          referenceCount: {
-            decrement: 1,
-          },
-        },
-      });
     });
   }
 
@@ -1349,6 +1949,56 @@ export class FilesService {
     }
   }
 
+  private async resolveMultipartResourceOwnerId(
+    userId: string,
+    fileId: string | null,
+    folderId: string | null,
+  ): Promise<string> {
+    if (fileId) {
+      await this.accessService.requireFileRole(userId, fileId, 'EDITOR');
+
+      const file = await this.prisma.file.findFirst({
+        where: {
+          id: fileId,
+          deletedAt: null,
+        },
+        select: {
+          ownerId: true,
+        },
+      });
+
+      if (!file) {
+        throw new NotFoundException('File not found');
+      }
+
+      return file.ownerId;
+    }
+
+    if (folderId) {
+      await this.accessService.requireFolderRole(userId, folderId, 'EDITOR');
+
+      const folder = await this.prisma.folder.findUnique({
+        where: {
+          id: folderId,
+        },
+        select: {
+          ownerId: true,
+        },
+      });
+
+      if (!folder) {
+        throw new NotFoundException('Folder not found');
+      }
+
+      return folder.ownerId;
+    }
+
+    /*
+     * Multipart в собственный root.
+     */
+    return userId;
+  }
+
   private async ensureOwnedFolderExists(
     ownerId: string,
     folderId: string,
@@ -1492,7 +2142,6 @@ export class FilesService {
       where: {
         id: uploadSessionId,
         status: 'COMPLETING',
-        fileId: null,
       },
       data: {
         status: 'UPLOADING',
@@ -1501,13 +2150,11 @@ export class FilesService {
   }
 
   private async getCompletedMultipartFile(
-    ownerId: string,
     fileId: string,
   ): Promise<FileResponseDto> {
     const file = await this.prisma.file.findFirst({
       where: {
         id: fileId,
-        ownerId,
         status: {
           in: ['PROCESSING', 'READY', 'FAILED'],
         },
@@ -1552,11 +2199,11 @@ export class FilesService {
   ): Promise<FileResponseDto> {
     const fileId = await this.prisma.$transaction(async (transaction) => {
       const lockedSessions = await transaction.$queryRaw<Array<{ id: string }>>`
-          SELECT "id"
-          FROM "UploadSession"
-          WHERE "id" = ${input.uploadSessionId}::uuid
-          FOR UPDATE
-        `;
+        SELECT "id"
+        FROM "UploadSession"
+        WHERE "id" = ${input.uploadSessionId}::uuid
+        FOR UPDATE
+      `;
 
       if (lockedSessions.length === 0) {
         throw new NotFoundException('Multipart upload session not found');
@@ -1592,10 +2239,123 @@ export class FilesService {
         );
       }
 
+      /*
+       * If fileId is already present before completion, this session belongs
+       * to a new version of an existing logical file.
+       */
+      if (lockedSession.fileId) {
+        const targetFileId = lockedSession.fileId;
+
+        const lockedFiles = await transaction.$queryRaw<Array<{ id: string }>>`
+          SELECT "id"
+          FROM "File"
+          WHERE "id" = ${targetFileId}::uuid
+            AND "ownerId" = ${input.resourceOwnerId}::uuid
+            AND "deletedAt" IS NULL
+          FOR UPDATE
+        `;
+
+        if (lockedFiles.length === 0) {
+          throw new NotFoundException('File not found');
+        }
+
+        const targetFile = await transaction.file.findUnique({
+          where: {
+            id: targetFileId,
+          },
+          select: {
+            status: true,
+            versions: {
+              orderBy: {
+                versionNumber: 'desc',
+              },
+              take: 1,
+              select: {
+                versionNumber: true,
+              },
+            },
+          },
+        });
+
+        if (!targetFile) {
+          throw new NotFoundException('File not found');
+        }
+
+        if (targetFile.status !== 'READY') {
+          throw new ConflictException(
+            'File is not ready to accept a new version',
+          );
+        }
+
+        const nextVersionNumber =
+          (targetFile.versions[0]?.versionNumber ?? 0) + 1;
+
+        const storedObject = await transaction.storedObject.create({
+          data: {
+            objectKey: input.objectKey,
+            size: input.totalSize,
+            referenceCount: 1,
+          },
+          select: {
+            id: true,
+          },
+        });
+
+        const version = await transaction.fileVersion.create({
+          data: {
+            fileId: targetFileId,
+            storedObjectId: storedObject.id,
+            versionNumber: nextVersionNumber,
+            originalName: input.originalName,
+            mimeType: input.mimeType,
+            size: input.totalSize,
+          },
+          select: {
+            id: true,
+          },
+        });
+
+        await transaction.file.update({
+          where: {
+            id: targetFileId,
+          },
+          data: {
+            currentVersionId: version.id,
+            status: 'PROCESSING',
+          },
+        });
+
+        await transaction.uploadSession.update({
+          where: {
+            id: input.uploadSessionId,
+          },
+          data: {
+            status: 'COMPLETED',
+          },
+        });
+
+        await transaction.outboxEvent.create({
+          data: {
+            type: PROCESS_FILE_OUTBOX_EVENT_TYPE,
+            aggregateId: targetFileId,
+            payload: {
+              fileId: targetFileId,
+              versionId: version.id,
+              storedObjectId: storedObject.id,
+            },
+          },
+        });
+
+        return targetFileId;
+      }
+
+      /*
+       * Ordinary multipart upload: create a brand-new logical File.
+       */
       const fileMetadata = await transaction.file.create({
         data: {
           name: input.originalName,
-          ownerId: input.ownerId,
+          ownerId: input.resourceOwnerId,
           folderId: input.folderId,
           status: 'UPLOADING',
         },
@@ -1664,6 +2424,6 @@ export class FilesService {
       return fileMetadata.id;
     });
 
-    return this.getCompletedMultipartFile(input.ownerId, fileId);
+    return this.getCompletedMultipartFile(fileId);
   }
 }

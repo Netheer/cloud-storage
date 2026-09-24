@@ -20,6 +20,7 @@ import {
   listFiles,
   type StoredFile,
   uploadFile,
+  uploadFileVersion,
   createFileDownload,
   createFilePreview,
   renameFile,
@@ -33,9 +34,19 @@ import {
   isMultipartUploadAbortError,
   requiresMultipartUpload,
   uploadLargeFile,
+  uploadLargeFileVersion,
 } from '../files/multipart-upload';
+import { FileVersionsDialog } from '../files/FileVersionsDialog';
+import { ShareDialog } from '../access/ShareDialog';
+import { listSharedFolders } from '../access/sharing-api';
 
 type Breadcrumb = {
+  id: string;
+  name: string;
+};
+
+type ShareTarget = {
+  type: 'folder' | 'file';
   id: string;
   name: string;
 };
@@ -168,7 +179,8 @@ function folderCountLabel(count: number): string {
 function DashboardPage() {
   const { user, logout, authFetch } = useAuth();
   const location = useLocation();
-const navigate = useNavigate();
+  const navigate = useNavigate();
+  const isSharedMode = location.pathname.startsWith('/shared/folders/');
 
   const [breadcrumbs, setBreadcrumbs] = useState<
     Breadcrumb[]
@@ -199,11 +211,18 @@ const navigate = useNavigate();
     useState<string | null>(null);
   const [fileToMove, setFileToMove] =
     useState<StoredFile | null>(null);
+  const [fileWithVersions, setFileWithVersions] =
+  useState<StoredFile | null>(null);
   const [isMovingFile, setIsMovingFile] =
     useState(false);
   const [fileMoveError, setFileMoveError] =
     useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const versionFileInputRef =
+  useRef<HTMLInputElement>(null);
+
+  const versionUploadTargetRef =
+    useRef<StoredFile | null>(null);
   const uploadAbortControllerRef =
   useRef<AbortController | null>(null);
 
@@ -233,6 +252,49 @@ const [isCancellingUpload, setIsCancellingUpload] =
   const currentFolder =
     breadcrumbs[breadcrumbs.length - 1] ?? null;
   const currentParentId = currentFolder?.id ?? null;
+  const [folderToMove, setFolderToMove] =
+  useState<Folder | null>(null);
+
+const [isMoving, setIsMoving] =
+  useState(false);
+
+const [moveError, setMoveError] =
+  useState<string | null>(null);
+
+const userLabel =
+  user?.displayName ||
+  user?.email ||
+  'Пользователь';
+
+const userInitial =
+  userLabel.charAt(0).toUpperCase();
+
+    const [shareTarget, setShareTarget] =
+  useState<ShareTarget | null>(null);
+  
+    const handleOpenFolderShareDialog = (
+  folder: Folder,
+) => {
+  setActiveMenuId(null);
+
+  setShareTarget({
+    type: 'folder',
+    id: folder.id,
+    name: folder.name,
+  });
+};
+
+const handleOpenFileShareDialog = (
+  file: StoredFile,
+) => {
+  setActiveFileMenuId(null);
+
+  setShareTarget({
+    type: 'file',
+    id: file.id,
+    name: file.name,
+  });
+};
   useEffect(() => {
   let active = true;
 
@@ -242,34 +304,116 @@ const [isCancellingUpload, setIsCancellingUpload] =
       return;
     }
 
-    const prefix = '/folders/';
+    const sharedPrefix = '/shared/folders/';
+    const ownedPrefix = '/folders/';
 
-    if (!location.pathname.startsWith(prefix)) {
+    const shared =
+      location.pathname.startsWith(
+        sharedPrefix,
+      );
+
+    const prefix = shared
+      ? sharedPrefix
+      : ownedPrefix;
+
+    if (
+      !shared &&
+      !location.pathname.startsWith(
+        ownedPrefix,
+      )
+    ) {
       return;
     }
 
     const folderIds = location.pathname
       .slice(prefix.length)
       .split('/')
-      .filter(Boolean);
+      .filter(Boolean)
+      .map((folderId) =>
+        decodeURIComponent(folderId),
+      );
 
-    const restoredBreadcrumbs: Breadcrumb[] = [];
+    if (folderIds.length === 0) {
+      if (active) {
+        setBreadcrumbs([]);
+
+        navigate(
+          shared ? '/shared' : '/',
+          {
+            replace: true,
+          },
+        );
+      }
+
+      return;
+    }
+
+    const restoredBreadcrumbs: Breadcrumb[] =
+      [];
+
     let parentId: string | null = null;
+    let startIndex = 0;
 
-    for (const folderId of folderIds) {
-      const childFolders = await listFolders(
-        authFetch,
-        parentId,
-      );
+    if (shared) {
+      const sharedFolders =
+        await listSharedFolders(authFetch);
 
-      const folder = childFolders.find(
-        (candidate) => candidate.id === folderId,
-      );
+      const sharedRoot =
+        sharedFolders.find(
+          (folder) =>
+            folder.id === folderIds[0],
+        );
+
+      if (!sharedRoot) {
+        if (active) {
+          setBreadcrumbs([]);
+
+          navigate('/shared', {
+            replace: true,
+          });
+        }
+
+        return;
+      }
+
+      restoredBreadcrumbs.push({
+        id: sharedRoot.id,
+        name: sharedRoot.name,
+      });
+
+      parentId = sharedRoot.id;
+      startIndex = 1;
+    }
+
+    for (
+      let index = startIndex;
+      index < folderIds.length;
+      index += 1
+    ) {
+      const folderId = folderIds[index];
+
+      const childFolders =
+        await listFolders(
+          authFetch,
+          parentId,
+        );
+
+      const folder =
+        childFolders.find(
+          (candidate) =>
+            candidate.id === folderId,
+        );
 
       if (!folder) {
         if (active) {
           setBreadcrumbs([]);
-          navigate('/', { replace: true });
+
+          navigate(
+            shared ? '/shared' : '/',
+            {
+              replace: true,
+            },
+          );
         }
 
         return;
@@ -284,32 +428,45 @@ const [isCancellingUpload, setIsCancellingUpload] =
     }
 
     if (active) {
-      setBreadcrumbs(restoredBreadcrumbs);
+      setBreadcrumbs(
+        restoredBreadcrumbs,
+      );
     }
   };
 
   void restoreBreadcrumbs().catch(() => {
     if (active) {
       setBreadcrumbs([]);
-      navigate('/', { replace: true });
+
+      navigate(
+        isSharedMode
+          ? '/shared'
+          : '/',
+        {
+          replace: true,
+        },
+      );
     }
   });
 
   return () => {
     active = false;
   };
-}, [authFetch, location.pathname, navigate]);
-  const [folderToMove, setFolderToMove] =
-    useState<Folder | null>(null);
-  const [isMoving, setIsMoving] = useState(false);
-  const [moveError, setMoveError] =
-    useState<string | null>(null);
-
-  const userLabel =
-    user?.displayName || user?.email || 'Пользователь';
-  const userInitial = userLabel.charAt(0).toUpperCase();
+}, [
+  authFetch,
+  isSharedMode,
+  location.pathname,
+  navigate,
+]);
 
   useEffect(() => {
+    if (
+    isSharedMode &&
+    breadcrumbs.length === 0
+  ) {
+    setIsLoading(true);
+    return;
+  }
     let active = true;
 
     setIsLoading(true);
@@ -345,7 +502,13 @@ const [isCancellingUpload, setIsCancellingUpload] =
     return () => {
       active = false;
     };
-  }, [authFetch, currentParentId, reloadVersion]);
+  }, [
+  authFetch,
+  breadcrumbs.length,
+  currentParentId,
+  isSharedMode,
+  reloadVersion,
+]);
 
   useEffect(() => {
   let active = true;
@@ -470,7 +633,9 @@ const handleOpenCreateDialog = () => {
   setIsCreateDialogOpen(true);
 };
 
-  const handleOpenFolder = (folder: Folder) => {
+  const handleOpenFolder = (
+  folder: Folder,
+) => {
   const nextBreadcrumbs = [
     ...breadcrumbs,
     {
@@ -481,10 +646,16 @@ const handleOpenCreateDialog = () => {
 
   setBreadcrumbs(nextBreadcrumbs);
 
+  const prefix = isSharedMode
+    ? '/shared/folders'
+    : '/folders';
+
   navigate(
-    `/folders/${nextBreadcrumbs
+    `${prefix}/${nextBreadcrumbs
       .map((breadcrumb) =>
-        encodeURIComponent(breadcrumb.id),
+        encodeURIComponent(
+          breadcrumb.id,
+        ),
       )
       .join('/')}`,
   );
@@ -492,24 +663,49 @@ const handleOpenCreateDialog = () => {
 
 const handleOpenRoot = () => {
   setBreadcrumbs([]);
-  navigate('/');
+
+  navigate(
+    isSharedMode
+      ? '/shared'
+      : '/',
+  );
 };
 
-const handleOpenBreadcrumb = (index: number) => {
-  const nextBreadcrumbs = breadcrumbs.slice(
-    0,
-    index + 1,
-  );
+const handleOpenBreadcrumb = (
+  index: number,
+) => {
+  const nextBreadcrumbs =
+    breadcrumbs.slice(
+      0,
+      index + 1,
+    );
 
   setBreadcrumbs(nextBreadcrumbs);
 
+  const prefix = isSharedMode
+    ? '/shared/folders'
+    : '/folders';
+
   navigate(
-    `/folders/${nextBreadcrumbs
+    `${prefix}/${nextBreadcrumbs
       .map((breadcrumb) =>
-        encodeURIComponent(breadcrumb.id),
+        encodeURIComponent(
+          breadcrumb.id,
+        ),
       )
       .join('/')}`,
   );
+};
+
+const handleOpenVersionUpload = (
+  file: StoredFile,
+) => {
+  setActiveFileMenuId(null);
+  setError(null);
+
+  versionUploadTargetRef.current = file;
+
+  versionFileInputRef.current?.click();
 };
 
   const handleSelectFile = async (
@@ -607,6 +803,92 @@ const handleOpenBreadcrumb = (index: number) => {
   }
 };
 
+const handleSelectFileVersion = async (
+  event: ChangeEvent<HTMLInputElement>,
+) => {
+  const selectedFile = event.target.files?.[0];
+  const targetFile = versionUploadTargetRef.current;
+
+  event.target.value = '';
+  versionUploadTargetRef.current = null;
+
+  if (!selectedFile || !targetFile) {
+    return;
+  }
+
+  const usesMultipartUpload =
+    requiresMultipartUpload(selectedFile);
+
+  setIsUploading(true);
+  setUploadProgress(
+    usesMultipartUpload ? 0 : null,
+  );
+  setError(null);
+
+  const uploadAbortController =
+    usesMultipartUpload
+      ? new AbortController()
+      : null;
+
+  uploadAbortControllerRef.current =
+    uploadAbortController;
+
+  try {
+    if (usesMultipartUpload) {
+      await uploadLargeFileVersion(
+        authFetch,
+        selectedFile,
+        targetFile.id,
+        {
+          signal:
+            uploadAbortController?.signal,
+          onProgress: ({ percent }) => {
+            setUploadProgress(percent);
+          },
+        },
+      );
+    } else {
+      await uploadFileVersion(
+        authFetch,
+        targetFile.id,
+        selectedFile,
+      );
+    }
+
+    setReloadVersion((version) => version + 1);
+  } catch (requestError) {
+    if (
+      isMultipartUploadAbortError(requestError)
+    ) {
+      setError(null);
+    } else if (
+      requestError instanceof ApiError &&
+      requestError.status === 409
+    ) {
+      setError(
+        'Файл сейчас обрабатывается и пока не может принять новую версию.',
+      );
+    } else {
+      setError(
+        requestError instanceof ApiError
+          ? requestError.message
+          : 'Не удалось загрузить новую версию файла',
+      );
+    }
+  } finally {
+    if (
+      uploadAbortControllerRef.current ===
+      uploadAbortController
+    ) {
+      uploadAbortControllerRef.current = null;
+    }
+
+    setIsUploading(false);
+    setIsCancellingUpload(false);
+    setUploadProgress(null);
+  }
+};
+
   const handleCancelUpload = () => {
   const controller =
     uploadAbortControllerRef.current;
@@ -648,6 +930,13 @@ const handleOpenBreadcrumb = (index: number) => {
       setDownloadingFileId(null);
     }
   };
+
+  const handleOpenFileVersions = (
+  file: StoredFile,
+) => {
+  setActiveFileMenuId(null);
+  setFileWithVersions(file);
+};
 
   const handleOpenFileRenameDialog = (
   file: StoredFile,
@@ -769,8 +1058,12 @@ const handleMoveFile = async (
     setError(null);
 
     try {
-      await logout();
-    } catch (requestError) {
+  await logout();
+
+  navigate('/login', {
+    replace: true,
+  });
+} catch (requestError) {
       setError(
         requestError instanceof ApiError
           ? requestError.message
@@ -882,12 +1175,42 @@ const handleMoveFile = async (
           </div>
         </div>
 
-        <nav className="sidebar-nav" aria-label="Основная навигация">
-          <button className="sidebar-nav__item sidebar-nav__item--active">
-            <span className="sidebar-nav__icon">▰</span>
-            Мои файлы
-          </button>
-        </nav>
+        <nav
+  className="sidebar-nav"
+  aria-label="Основная навигация"
+>
+  <button
+    className={
+      isSharedMode
+        ? 'sidebar-nav__item'
+        : 'sidebar-nav__item sidebar-nav__item--active'
+    }
+    type="button"
+    onClick={() => navigate('/')}
+  >
+    <span className="sidebar-nav__icon">
+      ▰
+    </span>
+    Мои файлы
+  </button>
+
+  <button
+    className={
+      isSharedMode
+        ? 'sidebar-nav__item sidebar-nav__item--active'
+        : 'sidebar-nav__item'
+    }
+    type="button"
+    onClick={() =>
+      navigate('/shared')
+    }
+  >
+    <span className="sidebar-nav__icon">
+      ◈
+    </span>
+    Доступные мне
+  </button>
+</nav>
 
         <div className="sidebar__spacer" />
 
@@ -916,7 +1239,12 @@ const handleMoveFile = async (
             <p className="workspace-header__eyebrow">
               Файловый менеджер
             </p>
-            <h1>{currentFolder?.name ?? 'Мои файлы'}</h1>
+            <h1>
+  {currentFolder?.name ??
+    (isSharedMode
+      ? 'Доступные мне'
+      : 'Мои файлы')}
+</h1>
           </div>
 
           <div className="workspace-header__actions">
@@ -926,6 +1254,15 @@ const handleMoveFile = async (
     type="file"
     onChange={(event) => void handleSelectFile(event)}
   />
+
+  <input
+  ref={versionFileInputRef}
+  className="visually-hidden"
+  type="file"
+  onChange={(event) =>
+    void handleSelectFileVersion(event)
+  }
+/>
 
   <button
     className="secondary-button"
@@ -976,7 +1313,9 @@ const handleMoveFile = async (
             }
             onClick={handleOpenRoot}
           >
-            Мои файлы
+            {isSharedMode
+  ? 'Доступные мне'
+  : 'Мои файлы'}
           </button>
 
           {breadcrumbs.map((breadcrumb, index) => (
@@ -1109,13 +1448,28 @@ const handleMoveFile = async (
             Переместить
           </button>
 
-          <button
-          className="folder-card__delete-action"
-          type="button"
-          onClick={() => handleOpenDeleteDialog(folder)}
-        >
-          Удалить
-        </button>
+          {user?.id === folder.ownerId && (
+  <button
+    type="button"
+    onClick={() =>
+      handleOpenFolderShareDialog(folder)
+    }
+  >
+    Общий доступ
+  </button>
+)}
+
+          {user?.id === folder.ownerId && (
+  <button
+    className="folder-card__delete-action"
+    type="button"
+    onClick={() =>
+      handleOpenDeleteDialog(folder)
+    }
+  >
+    Удалить
+  </button>
+)}
         </div>
       )}
     </div>
@@ -1234,6 +1588,23 @@ const handleMoveFile = async (
   </button>
 
   <button
+  type="button"
+  disabled={isUploading}
+  onClick={() =>
+    handleOpenVersionUpload(file)
+  }
+>
+  Загрузить новую версию
+</button>
+
+<button
+  type="button"
+  onClick={() => handleOpenFileVersions(file)}
+>
+  История версий
+</button>
+
+  <button
     type="button"
     onClick={() => handleOpenFileRenameDialog(file)}
   >
@@ -1247,13 +1618,28 @@ const handleMoveFile = async (
   Переместить
 </button>
 
+{user?.id === file.ownerId && (
   <button
-  className="folder-card__delete-action"
-  type="button"
-  onClick={() => handleOpenFileDeleteDialog(file)}
->
-  Удалить
-</button>
+    type="button"
+    onClick={() =>
+      handleOpenFileShareDialog(file)
+    }
+  >
+    Общий доступ
+  </button>
+)}
+
+  {user?.id === file.ownerId && (
+  <button
+    className="folder-card__delete-action"
+    type="button"
+    onClick={() =>
+      handleOpenFileDeleteDialog(file)
+    }
+  >
+    Удалить
+  </button>
+)}
 </div>
     )}
   </div>
@@ -1324,6 +1710,21 @@ const handleMoveFile = async (
     />
   )}
 
+  {fileWithVersions && (
+  <FileVersionsDialog
+    authFetch={authFetch}
+    file={fileWithVersions}
+    onClose={() =>
+      setFileWithVersions(null)
+    }
+    onRestored={() => {
+      setReloadVersion(
+        (version) => version + 1,
+      );
+    }}
+  />
+)}
+
   {fileToDelete && (
   <DeleteFolderDialog
     itemName={fileToDelete.name}
@@ -1346,6 +1747,11 @@ const handleMoveFile = async (
   itemType="folder"
   currentFolderId={folderToMove.parentId}
   excludedFolderId={folderToMove.id}
+  sharedRoot={
+      isSharedMode && breadcrumbs.length > 0
+        ? breadcrumbs[0]
+        : null
+    }
   isSubmitting={isMoving}
       error={moveError}
       onClose={() => {
@@ -1358,11 +1764,26 @@ const handleMoveFile = async (
     />
   )}
 
+  {shareTarget && (
+  <ShareDialog
+    resourceType={shareTarget.type}
+    resourceId={shareTarget.id}
+    resourceName={shareTarget.name}
+    authFetch={authFetch}
+    onClose={() => setShareTarget(null)}
+  />
+)}
+
   {fileToMove && (
   <MoveFolderDialog
     itemName={fileToMove.name}
     itemType="file"
     currentFolderId={fileToMove.folderId}
+    sharedRoot={
+      isSharedMode && breadcrumbs.length > 0
+        ? breadcrumbs[0]
+        : null
+    }
     isSubmitting={isMovingFile}
     error={fileMoveError}
     onClose={() => {

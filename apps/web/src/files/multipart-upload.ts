@@ -5,6 +5,7 @@ import {
   createMultipartUploadPartUrl,
   getMultipartUploadStatus,
   initiateMultipartUpload,
+  initiateMultipartVersionUpload,
   type AuthFetch,
   type MultipartUploadedPart,
   type MultipartUploadSession,
@@ -182,46 +183,70 @@ async function uploadPartWithRetry(
   }
 }
 
+async function initiateUploadSession(
+  authFetch: AuthFetch,
+  file: File,
+  folderId: string | null,
+  targetFileId: string | null,
+  clientRequestId: string,
+  signal?: AbortSignal,
+): Promise<MultipartUploadSession> {
+  if (targetFileId) {
+    return initiateMultipartVersionUpload(
+      authFetch,
+      targetFileId,
+      {
+        clientRequestId,
+        fileName: file.name,
+        mimeType: file.type || undefined,
+        totalSize: file.size.toString(),
+      },
+      signal,
+    );
+  }
+
+  return initiateMultipartUpload(
+    authFetch,
+    {
+      clientRequestId,
+      fileName: file.name,
+      mimeType: file.type || undefined,
+      totalSize: file.size.toString(),
+      folderId,
+    },
+    signal,
+  );
+}
+
 async function createFreshMultipartSession(
   authFetch: AuthFetch,
   file: File,
   folderId: string | null,
+  targetFileId: string | null,
   signal?: AbortSignal,
 ): Promise<PreparedMultipartUpload> {
   const persistedUpload =
     createPersistedMultipartUpload(
       file,
       folderId,
+      targetFileId,
     );
 
-  /*
-   * Сохраняем clientRequestId ДО запроса.
-   *
-   * Если сервер создаст сессию, но ответ потеряется
-   * из-за сети или reload, этот clientRequestId
-   * можно использовать повторно.
-   */
   savePersistedMultipartUpload(
     file,
     folderId,
     persistedUpload,
+    targetFileId,
   );
 
-  const session =
-    await initiateMultipartUpload(
-      authFetch,
-      {
-        clientRequestId:
-          persistedUpload.clientRequestId,
-        fileName: file.name,
-        mimeType:
-          file.type || undefined,
-        totalSize:
-          file.size.toString(),
-        folderId,
-      },
-      signal,
-    );
+  const session = await initiateUploadSession(
+    authFetch,
+    file,
+    folderId,
+    targetFileId,
+    persistedUpload.clientRequestId,
+    signal,
+  );
 
   persistedUpload.sessionId = session.id;
 
@@ -229,6 +254,7 @@ async function createFreshMultipartSession(
     file,
     folderId,
     persistedUpload,
+    targetFileId,
   );
 
   return {
@@ -241,46 +267,35 @@ async function prepareMultipartUpload(
   authFetch: AuthFetch,
   file: File,
   folderId: string | null,
+  targetFileId: string | null,
   signal?: AbortSignal,
 ): Promise<PreparedMultipartUpload> {
   let persistedUpload =
     getPersistedMultipartUpload(
-      file,
-      folderId,
-    );
+  file,
+  folderId,
+  targetFileId,
+);
 
   if (!persistedUpload) {
     return createFreshMultipartSession(
-      authFetch,
-      file,
-      folderId,
-      signal,
-    );
+  authFetch,
+  file,
+  folderId,
+  targetFileId,
+  signal,
+);
   }
 
-  /*
-   * Есть clientRequestId, но reload мог случиться
-   * раньше, чем мы успели записать sessionId.
-   *
-   * Повторяем initiate с тем же ключом.
-   * Backend сделает это идемпотентно.
-   */
   if (!persistedUpload.sessionId) {
-    const session =
-      await initiateMultipartUpload(
-        authFetch,
-        {
-          clientRequestId:
-            persistedUpload.clientRequestId,
-          fileName: file.name,
-          mimeType:
-            file.type || undefined,
-          totalSize:
-            file.size.toString(),
-          folderId,
-        },
-        signal,
-      );
+    const session = await initiateUploadSession(
+  authFetch,
+  file,
+  folderId,
+  targetFileId,
+  persistedUpload.clientRequestId,
+  signal,
+);
 
     persistedUpload = {
       ...persistedUpload,
@@ -288,10 +303,11 @@ async function prepareMultipartUpload(
     };
 
     savePersistedMultipartUpload(
-      file,
-      folderId,
-      persistedUpload,
-    );
+  file,
+  folderId,
+  persistedUpload,
+  targetFileId,
+);
 
     return {
       session,
@@ -319,21 +335,19 @@ async function prepareMultipartUpload(
       };
     }
 
-    /*
-     * ABORTED / EXPIRED / FAILED / CREATED
-     * не продолжаем как существующую загрузку.
-     */
     removePersistedMultipartUpload(
-      file,
-      folderId,
-    );
+  file,
+  folderId,
+  targetFileId,
+);
 
     return createFreshMultipartSession(
-      authFetch,
-      file,
-      folderId,
-      signal,
-    );
+  authFetch,
+  file,
+  folderId,
+  targetFileId,
+  signal,
+);
   } catch (error) {
     if (
       isMultipartUploadAbortError(error)
@@ -350,16 +364,18 @@ async function prepareMultipartUpload(
       error.status === 404
     ) {
       removePersistedMultipartUpload(
-        file,
-        folderId,
-      );
+  file,
+  folderId,
+  targetFileId,
+);
 
       return createFreshMultipartSession(
-        authFetch,
-        file,
-        folderId,
-        signal,
-      );
+  authFetch,
+  file,
+  folderId,
+  targetFileId,
+  signal,
+);
     }
 
     throw error;
@@ -405,10 +421,11 @@ function readUploadedParts(
   };
 }
 
-export async function uploadLargeFile(
+async function uploadLargeFileInternal(
   authFetch: AuthFetch,
   file: File,
   folderId: string | null,
+  targetFileId: string | null,
   options: UploadLargeFileOptions = {},
 ): Promise<StoredFile> {
   let activeSessionId: string | null = null;
@@ -416,11 +433,12 @@ export async function uploadLargeFile(
   try {
     const prepared =
       await prepareMultipartUpload(
-        authFetch,
-        file,
-        folderId,
-        options.signal,
-      );
+  authFetch,
+  file,
+  folderId,
+  targetFileId,
+  options.signal,
+);
 
     const session = prepared.session;
 
@@ -446,9 +464,10 @@ export async function uploadLargeFile(
         );
 
       removePersistedMultipartUpload(
-        file,
-        folderId,
-      );
+  file,
+  folderId,
+  targetFileId,
+);
 
       return completedFile;
     }
@@ -629,9 +648,10 @@ export async function uploadLargeFile(
       );
 
     removePersistedMultipartUpload(
-      file,
-      folderId,
-    );
+  file,
+  folderId,
+  targetFileId,
+);
 
     return completedFile;
   } catch (error) {
@@ -651,9 +671,10 @@ export async function uploadLargeFile(
       }
 
       removePersistedMultipartUpload(
-        file,
-        folderId,
-      );
+  file,
+  folderId,
+  targetFileId,
+);
     }
 
     /*
@@ -662,4 +683,34 @@ export async function uploadLargeFile(
      */
     throw error;
   }
+}
+
+export function uploadLargeFile(
+  authFetch: AuthFetch,
+  file: File,
+  folderId: string | null,
+  options: UploadLargeFileOptions = {},
+): Promise<StoredFile> {
+  return uploadLargeFileInternal(
+    authFetch,
+    file,
+    folderId,
+    null,
+    options,
+  );
+}
+
+export function uploadLargeFileVersion(
+  authFetch: AuthFetch,
+  file: File,
+  fileId: string,
+  options: UploadLargeFileOptions = {},
+): Promise<StoredFile> {
+  return uploadLargeFileInternal(
+    authFetch,
+    file,
+    null,
+    fileId,
+    options,
+  );
 }

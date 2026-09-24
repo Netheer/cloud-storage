@@ -33,6 +33,7 @@ import {
   ApiConflictResponse,
   ApiServiceUnavailableResponse,
   ApiGoneResponse,
+  ApiForbiddenResponse,
 } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { MultipartUploadStatusResponseDto } from './dto/multipart-upload-status-response.dto';
@@ -49,6 +50,12 @@ import { InitiateMultipartUploadDto } from './dto/initiate-multipart-upload.dto'
 import { MultipartUploadSessionResponseDto } from './dto/multipart-upload-session-response.dto';
 import { MultipartUploadPartUrlResponseDto } from './dto/multipart-upload-part-url-response.dto';
 import { PreviewFileResponseDto } from './dto/preview-file-response.dto';
+import { FileVersionResponseDto } from './dto/file-version-response.dto';
+import { AccessService } from '../access/access.service';
+import { CreateShareDto } from '../access/dto/create-share.dto';
+import { ShareResponseDto } from '../access/dto/share-response.dto';
+import { UpdateShareDto } from '../access/dto/update-share.dto';
+import { SharedFileResponseDto } from '../access/dto/shared-file-response.dto';
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 
@@ -57,7 +64,10 @@ const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 @UseGuards(JwtAuthGuard)
 @Controller('files')
 export class FilesController {
-  constructor(private readonly filesService: FilesService) {}
+  constructor(
+    private readonly filesService: FilesService,
+    private readonly accessService: AccessService,
+  ) {}
 
   @Post('upload')
   @UseInterceptors(
@@ -111,6 +121,100 @@ export class FilesController {
     }
 
     return this.filesService.upload(user.id, file, dto);
+  }
+
+  @Post(':id/versions')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fileSize: MAX_FILE_SIZE_BYTES,
+      },
+    }),
+  )
+  @ApiOperation({
+    summary: 'Upload a new version of an existing file',
+  })
+  @ApiParam({
+    name: 'id',
+    format: 'uuid',
+    description: 'File ID',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+    },
+  })
+  @ApiCreatedResponse({
+    description: 'New file version uploaded successfully',
+    type: FileResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'File is missing or request data is invalid',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Access token is missing or invalid',
+  })
+  @ApiNotFoundResponse({
+    description: 'File not found',
+  })
+  @ApiConflictResponse({
+    description: 'File is not ready to accept a new version',
+  })
+  uploadVersion(
+    @CurrentUser() user: UserResponseDto,
+    @Param('id', ParseUUIDPipe) fileId: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+  ): Promise<FileResponseDto> {
+    if (!file) {
+      throw new BadRequestException('File is required');
+    }
+
+    return this.filesService.uploadVersion(user.id, fileId, file);
+  }
+
+  @Post(':id/versions/multipart')
+  @ApiOperation({
+    summary: 'Initiate a resumable multipart upload for a new file version',
+  })
+  @ApiParam({
+    name: 'id',
+    format: 'uuid',
+    description: 'File ID',
+  })
+  @ApiCreatedResponse({
+    description: 'Multipart version upload session created or returned',
+    type: MultipartUploadSessionResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'Upload parameters are invalid',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Access token is missing or invalid',
+  })
+  @ApiNotFoundResponse({
+    description: 'File not found',
+  })
+  @ApiConflictResponse({
+    description:
+      'File is not ready to accept a new version or client request ID conflicts',
+  })
+  @ApiServiceUnavailableResponse({
+    description: 'Object storage is temporarily unavailable',
+  })
+  initiateMultipartVersionUpload(
+    @CurrentUser() user: UserResponseDto,
+    @Param('id', ParseUUIDPipe) fileId: string,
+    @Body() dto: InitiateMultipartUploadDto,
+  ): Promise<MultipartUploadSessionResponseDto> {
+    return this.filesService.initiateMultipartUpload(user.id, dto, fileId);
   }
 
   @Post('multipart')
@@ -246,6 +350,252 @@ export class FilesController {
     @Param('sessionId', ParseUUIDPipe) uploadSessionId: string,
   ): Promise<MultipartUploadStatusResponseDto> {
     return this.filesService.getMultipartUploadStatus(user.id, uploadSessionId);
+  }
+
+  @Get(':id/versions')
+  @ApiOperation({
+    summary: 'List all versions of a file',
+  })
+  @ApiParam({
+    name: 'id',
+    format: 'uuid',
+    description: 'File ID',
+  })
+  @ApiOkResponse({
+    description: 'File versions returned successfully',
+    type: FileVersionResponseDto,
+    isArray: true,
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid file ID',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Access token is missing or invalid',
+  })
+  @ApiNotFoundResponse({
+    description: 'File not found',
+  })
+  listVersions(
+    @CurrentUser() user: UserResponseDto,
+    @Param('id', ParseUUIDPipe) fileId: string,
+  ): Promise<FileVersionResponseDto[]> {
+    return this.filesService.listVersions(user.id, fileId);
+  }
+  @Get(':id/versions/:versionId/download')
+  @ApiOperation({
+    summary: 'Create a temporary download URL for a specific file version',
+  })
+  @ApiParam({
+    name: 'id',
+    format: 'uuid',
+    description: 'File ID',
+  })
+  @ApiParam({
+    name: 'versionId',
+    format: 'uuid',
+    description: 'File version ID',
+  })
+  @ApiOkResponse({
+    description: 'Temporary version download URL created successfully',
+    type: DownloadFileResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid file ID or version ID',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Access token is missing or invalid',
+  })
+  @ApiNotFoundResponse({
+    description: 'File version not found',
+  })
+  createVersionDownloadUrl(
+    @CurrentUser() user: UserResponseDto,
+    @Param('id', ParseUUIDPipe) fileId: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+  ): Promise<DownloadFileResponseDto> {
+    return this.filesService.createVersionDownloadUrl(
+      user.id,
+      fileId,
+      versionId,
+    );
+  }
+
+  @Post(':id/versions/:versionId/restore')
+  @ApiOperation({
+    summary: 'Restore a previous file version as a new version',
+  })
+  @ApiParam({
+    name: 'id',
+    format: 'uuid',
+    description: 'File ID',
+  })
+  @ApiParam({
+    name: 'versionId',
+    format: 'uuid',
+    description: 'Source file version ID',
+  })
+  @ApiCreatedResponse({
+    description: 'File version restored successfully',
+    type: FileResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid file ID or version ID',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Access token is missing or invalid',
+  })
+  @ApiNotFoundResponse({
+    description: 'File or file version not found',
+  })
+  @ApiConflictResponse({
+    description: 'File is not ready or the selected version is already current',
+  })
+  restoreVersion(
+    @CurrentUser() user: UserResponseDto,
+    @Param('id', ParseUUIDPipe) fileId: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+  ): Promise<FileResponseDto> {
+    return this.filesService.restoreVersion(user.id, fileId, versionId);
+  }
+
+  @Get(':id/shares')
+  @ApiOperation({
+    summary: 'List users with direct access to a file',
+  })
+  @ApiParam({
+    name: 'id',
+    format: 'uuid',
+    description: 'File ID',
+  })
+  @ApiOkResponse({
+    description: 'File shares returned successfully',
+    type: ShareResponseDto,
+    isArray: true,
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Access token is missing or invalid',
+  })
+  @ApiForbiddenResponse({
+    description: 'Only the file owner can manage sharing',
+  })
+  @ApiNotFoundResponse({
+    description: 'File not found',
+  })
+  listShares(
+    @CurrentUser() user: UserResponseDto,
+    @Param('id', ParseUUIDPipe) fileId: string,
+  ): Promise<ShareResponseDto[]> {
+    return this.accessService.listFileShares(user.id, fileId);
+  }
+
+  @Post(':id/shares')
+  @ApiOperation({
+    summary: 'Share a file with a registered user',
+  })
+  @ApiParam({
+    name: 'id',
+    format: 'uuid',
+    description: 'File ID',
+  })
+  @ApiCreatedResponse({
+    description: 'File access granted successfully',
+    type: ShareResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid share data or sharing with yourself',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Access token is missing or invalid',
+  })
+  @ApiForbiddenResponse({
+    description: 'Only the file owner can manage sharing',
+  })
+  @ApiNotFoundResponse({
+    description: 'File or target user not found',
+  })
+  @ApiConflictResponse({
+    description: 'File is already directly shared with this user',
+  })
+  createShare(
+    @CurrentUser() user: UserResponseDto,
+    @Param('id', ParseUUIDPipe) fileId: string,
+    @Body() dto: CreateShareDto,
+  ): Promise<ShareResponseDto> {
+    return this.accessService.createFileShare(user.id, fileId, dto);
+  }
+
+  @Patch(':id/shares/:grantId')
+  @ApiOperation({
+    summary: 'Change a user role for a shared file',
+  })
+  @ApiParam({
+    name: 'id',
+    format: 'uuid',
+    description: 'File ID',
+  })
+  @ApiParam({
+    name: 'grantId',
+    format: 'uuid',
+    description: 'File access grant ID',
+  })
+  @ApiOkResponse({
+    description: 'File access role updated successfully',
+    type: ShareResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid file ID, grant ID, or role',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Access token is missing or invalid',
+  })
+  @ApiForbiddenResponse({
+    description: 'Only the file owner can manage sharing',
+  })
+  @ApiNotFoundResponse({
+    description: 'File or file share not found',
+  })
+  updateShare(
+    @CurrentUser() user: UserResponseDto,
+    @Param('id', ParseUUIDPipe) fileId: string,
+    @Param('grantId', ParseUUIDPipe) grantId: string,
+    @Body() dto: UpdateShareDto,
+  ): Promise<ShareResponseDto> {
+    return this.accessService.updateFileShare(user.id, fileId, grantId, dto);
+  }
+
+  @Delete(':id/shares/:grantId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Revoke direct access to a file',
+  })
+  @ApiParam({
+    name: 'id',
+    format: 'uuid',
+    description: 'File ID',
+  })
+  @ApiParam({
+    name: 'grantId',
+    format: 'uuid',
+    description: 'File access grant ID',
+  })
+  @ApiNoContentResponse({
+    description: 'File access revoked successfully',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Access token is missing or invalid',
+  })
+  @ApiForbiddenResponse({
+    description: 'Only the file owner can manage sharing',
+  })
+  @ApiNotFoundResponse({
+    description: 'File or file share not found',
+  })
+  removeShare(
+    @CurrentUser() user: UserResponseDto,
+    @Param('id', ParseUUIDPipe) fileId: string,
+    @Param('grantId', ParseUUIDPipe) grantId: string,
+  ): Promise<void> {
+    return this.accessService.removeFileShare(user.id, fileId, grantId);
   }
 
   @Get(':id/download')
@@ -467,5 +817,23 @@ export class FilesController {
     @Param('id', ParseUUIDPipe) fileId: string,
   ): Promise<void> {
     return this.filesService.remove(user.id, fileId);
+  }
+
+  @Get('shared-with-me')
+  @ApiOperation({
+    summary: 'List files shared directly with the current user',
+  })
+  @ApiOkResponse({
+    description: 'Shared files returned successfully',
+    type: SharedFileResponseDto,
+    isArray: true,
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Access token is missing or invalid',
+  })
+  listSharedWithMe(
+    @CurrentUser() user: UserResponseDto,
+  ): Promise<SharedFileResponseDto[]> {
+    return this.accessService.listSharedFiles(user.id);
   }
 }

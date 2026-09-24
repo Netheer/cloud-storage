@@ -32,3 +32,12 @@ export const UploadStatus = {
 } as const
 
 export type UploadStatus = (typeof UploadStatus)[keyof typeof UploadStatus]
+
+
+export const AccessRole = {
+  OWNER: 'OWNER',
+  EDITOR: 'EDITOR',
+  VIEWER: 'VIEWER'
+} as const
+
+export type AccessRole = (typeof AccessRole)[keyof typeof AccessRole]

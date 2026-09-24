@@ -22,6 +22,8 @@ describe('Folders (e2e)', () => {
 
   let ownerToken: string;
   let otherUserToken: string;
+  let otherUserId: string;
+  let noAccessUserToken: string;
 
   const password = 'StrongPassword123!';
   const createdEmails: string[] = [];
@@ -48,9 +50,26 @@ describe('Folders (e2e)', () => {
 
     const ownerEmail = createTestEmail('folders.owner');
     const otherEmail = createTestEmail('folders.other');
+    const noAccessEmail = createTestEmail('folders.no-access');
 
     ownerToken = await registerAndLogin(ownerEmail);
     otherUserToken = await registerAndLogin(otherEmail);
+    noAccessUserToken = await registerAndLogin(noAccessEmail);
+
+    const otherUser = await prisma.user.findUnique({
+      where: {
+        email: otherEmail,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!otherUser) {
+      throw new Error('Other test user was not created');
+    }
+
+    otherUserId = otherUser.id;
   });
 
   afterAll(async () => {
@@ -205,6 +224,553 @@ describe('Folders (e2e)', () => {
       .delete(`/folders/${child.id}`)
       .set(authorization(otherUserToken))
       .expect(404);
+  });
+
+  it('manages folder sharing lifecycle for a registered user', async () => {
+    const targetEmail = createTestEmail('folders.share.target');
+    const targetToken = await registerAndLogin(targetEmail);
+
+    const sharedRoot = await createFolder(ownerToken, 'Managed Shared Root');
+
+    const existingChild = await createFolder(
+      ownerToken,
+      'Existing Shared Child',
+      sharedRoot.id,
+    );
+
+    /*
+     * До выдачи доступа ресурс для targetUser
+     * вообще не существует с точки зрения API.
+     */
+    await request(app.getHttpServer())
+      .get('/folders')
+      .query({
+        parentId: sharedRoot.id,
+      })
+      .set(authorization(targetToken))
+      .expect(404);
+
+    /*
+     * OWNER выдаёт VIEWER.
+     */
+    const createShareResponse = await request(app.getHttpServer())
+      .post(`/folders/${sharedRoot.id}/shares`)
+      .set(authorization(ownerToken))
+      .send({
+        email: `  ${targetEmail.toUpperCase()}  `,
+        role: 'VIEWER',
+      })
+      .expect(201);
+
+    const createdShare = createShareResponse.body as {
+      id?: unknown;
+      userId?: unknown;
+      email?: unknown;
+      displayName?: unknown;
+      role?: unknown;
+      createdAt?: unknown;
+      updatedAt?: unknown;
+    };
+
+    expect(typeof createdShare.id).toBe('string');
+    expect(typeof createdShare.userId).toBe('string');
+
+    expect(createdShare).toMatchObject({
+      email: targetEmail,
+      role: 'VIEWER',
+    });
+
+    if (typeof createdShare.id !== 'string') {
+      throw new Error('Folder share ID is missing');
+    }
+
+    const grantId = createdShare.id;
+
+    /*
+     * Duplicate direct grant запрещён.
+     */
+    await request(app.getHttpServer())
+      .post(`/folders/${sharedRoot.id}/shares`)
+      .set(authorization(ownerToken))
+      .send({
+        email: targetEmail,
+        role: 'EDITOR',
+      })
+      .expect(409);
+
+    /*
+     * OWNER видит список direct grants.
+     */
+    const sharesResponse = await request(app.getHttpServer())
+      .get(`/folders/${sharedRoot.id}/shares`)
+      .set(authorization(ownerToken))
+      .expect(200);
+
+    expect(sharesResponse.body).toEqual([
+      expect.objectContaining({
+        id: grantId,
+        email: targetEmail,
+        role: 'VIEWER',
+      }),
+    ]);
+
+    /*
+     * VIEWER получает inherited read-доступ
+     * к содержимому shared root.
+     */
+    const viewerListResponse = await request(app.getHttpServer())
+      .get('/folders')
+      .query({
+        parentId: sharedRoot.id,
+      })
+      .set(authorization(targetToken))
+      .expect(200);
+
+    expect(viewerListResponse.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: existingChild.id,
+          parentId: sharedRoot.id,
+        }),
+      ]),
+    );
+
+    /*
+     * Но VIEWER не может создавать дочерние папки.
+     */
+    await request(app.getHttpServer())
+      .post('/folders')
+      .set(authorization(targetToken))
+      .send({
+        name: 'Viewer Denied Child',
+        parentId: sharedRoot.id,
+      })
+      .expect(403);
+
+    /*
+     * И не может управлять sharing.
+     */
+    await request(app.getHttpServer())
+      .get(`/folders/${sharedRoot.id}/shares`)
+      .set(authorization(targetToken))
+      .expect(403);
+
+    /*
+     * OWNER повышает VIEWER -> EDITOR.
+     */
+    const updateShareResponse = await request(app.getHttpServer())
+      .patch(`/folders/${sharedRoot.id}/shares/${grantId}`)
+      .set(authorization(ownerToken))
+      .send({
+        role: 'EDITOR',
+      })
+      .expect(200);
+
+    expect(updateShareResponse.body).toMatchObject({
+      id: grantId,
+      email: targetEmail,
+      role: 'EDITOR',
+    });
+
+    /*
+     * EDITOR теперь может изменять shared tree.
+     */
+    const editorChildResponse = await request(app.getHttpServer())
+      .post('/folders')
+      .set(authorization(targetToken))
+      .send({
+        name: 'Created By Editor',
+        parentId: sharedRoot.id,
+      })
+      .expect(201);
+
+    expect(editorChildResponse.body).toMatchObject({
+      name: 'Created By Editor',
+      ownerId: sharedRoot.ownerId,
+      parentId: sharedRoot.id,
+    });
+
+    /*
+     * Даже EDITOR не может управлять sharing:
+     * это исключительно OWNER operation.
+     */
+    await request(app.getHttpServer())
+      .patch(`/folders/${sharedRoot.id}/shares/${grantId}`)
+      .set(authorization(targetToken))
+      .send({
+        role: 'VIEWER',
+      })
+      .expect(403);
+
+    /*
+     * OWNER отзывает direct grant.
+     */
+    await request(app.getHttpServer())
+      .delete(`/folders/${sharedRoot.id}/shares/${grantId}`)
+      .set(authorization(ownerToken))
+      .expect(204);
+
+    /*
+     * После revoke доступ исчезает полностью.
+     */
+    await request(app.getHttpServer())
+      .get('/folders')
+      .query({
+        parentId: sharedRoot.id,
+      })
+      .set(authorization(targetToken))
+      .expect(404);
+
+    await request(app.getHttpServer())
+      .post('/folders')
+      .set(authorization(targetToken))
+      .send({
+        name: 'Revoked User Child',
+        parentId: sharedRoot.id,
+      })
+      .expect(404);
+
+    /*
+     * Direct grant действительно удалён.
+     */
+    const sharesAfterRevoke = await request(app.getHttpServer())
+      .get(`/folders/${sharedRoot.id}/shares`)
+      .set(authorization(ownerToken))
+      .expect(200);
+
+    expect(sharesAfterRevoke.body).toEqual([]);
+  });
+
+  it('allows VIEWER to read a shared folder hierarchy', async () => {
+    const root = await createFolder(ownerToken, 'Shared Root');
+
+    const child = await createFolder(ownerToken, 'Shared Child', root.id);
+
+    const grandchild = await createFolder(
+      ownerToken,
+      'Shared Grandchild',
+      child.id,
+    );
+
+    await prisma.folderAccessGrant.create({
+      data: {
+        folderId: root.id,
+        userId: otherUserId,
+        role: 'VIEWER',
+      },
+    });
+
+    const sharedUserRootList = await request(app.getHttpServer())
+      .get('/folders')
+      .set(authorization(otherUserToken))
+      .expect(200);
+
+    expect(sharedUserRootList.body).toEqual([]);
+
+    const childList = await request(app.getHttpServer())
+      .get('/folders')
+      .query({
+        parentId: root.id,
+      })
+      .set(authorization(otherUserToken))
+      .expect(200);
+
+    expect(childList.body).toEqual([
+      expect.objectContaining({
+        id: child.id,
+        name: 'Shared Child',
+        parentId: root.id,
+      }),
+    ]);
+
+    const grandchildList = await request(app.getHttpServer())
+      .get('/folders')
+      .query({
+        parentId: child.id,
+      })
+      .set(authorization(otherUserToken))
+      .expect(200);
+
+    expect(grandchildList.body).toEqual([
+      expect.objectContaining({
+        id: grandchild.id,
+        name: 'Shared Grandchild',
+        parentId: child.id,
+      }),
+    ]);
+
+    await request(app.getHttpServer())
+      .get('/folders')
+      .query({
+        parentId: root.id,
+      })
+      .set(authorization(noAccessUserToken))
+      .expect(404);
+  });
+
+  it('lists only folders shared directly with the current user', async () => {
+    const targetEmail = createTestEmail('folders.shared-with-me');
+    const targetToken = await registerAndLogin(targetEmail);
+
+    const sharedRoot = await createFolder(ownerToken, 'Shared Discovery Root');
+
+    const sharedChild = await createFolder(
+      ownerToken,
+      'Shared Discovery Child',
+      sharedRoot.id,
+    );
+
+    /*
+     * Собственная папка targetUser не должна
+     * попадать в Shared with me.
+     */
+    const targetOwnFolder = await createFolder(
+      targetToken,
+      'Target Own Folder',
+    );
+
+    /*
+     * До выдачи grant список пуст.
+     */
+    const emptyResponse = await request(app.getHttpServer())
+      .get('/folders/shared-with-me')
+      .set(authorization(targetToken))
+      .expect(200);
+
+    expect(emptyResponse.body).toEqual([]);
+
+    /*
+     * OWNER делится только root-папкой.
+     */
+    const shareResponse = await request(app.getHttpServer())
+      .post(`/folders/${sharedRoot.id}/shares`)
+      .set(authorization(ownerToken))
+      .send({
+        email: targetEmail,
+        role: 'VIEWER',
+      })
+      .expect(201);
+
+    const share = shareResponse.body as {
+      id?: unknown;
+      role?: unknown;
+    };
+
+    expect(share.role).toBe('VIEWER');
+
+    /*
+     * В discovery появляется только direct-shared root.
+     *
+     * sharedChild доступен по inheritance,
+     * но отдельной строкой здесь быть не должен.
+     */
+    const response = await request(app.getHttpServer())
+      .get('/folders/shared-with-me')
+      .set(authorization(targetToken))
+      .expect(200);
+
+    const body = response.body as Array<{
+      id?: unknown;
+      name?: unknown;
+      ownerId?: unknown;
+      parentId?: unknown;
+      role?: unknown;
+      sharedAt?: unknown;
+      createdAt?: unknown;
+      updatedAt?: unknown;
+    }>;
+
+    expect(body).toHaveLength(1);
+
+    expect(body[0]).toMatchObject({
+      id: sharedRoot.id,
+      name: 'Shared Discovery Root',
+      ownerId: sharedRoot.ownerId,
+      parentId: null,
+      role: 'VIEWER',
+    });
+
+    expect(typeof body[0]?.sharedAt).toBe('string');
+    expect(typeof body[0]?.createdAt).toBe('string');
+    expect(typeof body[0]?.updatedAt).toBe('string');
+
+    expect(body.some((folder) => folder.id === sharedChild.id)).toBe(false);
+
+    expect(body.some((folder) => folder.id === targetOwnFolder.id)).toBe(false);
+
+    /*
+     * При этом inherited child остаётся
+     * доступен через обычную навигацию.
+     */
+    const childListResponse = await request(app.getHttpServer())
+      .get('/folders')
+      .query({
+        parentId: sharedRoot.id,
+      })
+      .set(authorization(targetToken))
+      .expect(200);
+
+    expect(childListResponse.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: sharedChild.id,
+        }),
+      ]),
+    );
+
+    /*
+     * После revoke ресурс исчезает
+     * из Shared with me.
+     */
+    if (typeof share.id !== 'string') {
+      throw new Error('Folder share ID is missing');
+    }
+
+    await request(app.getHttpServer())
+      .delete(`/folders/${sharedRoot.id}/shares/${share.id}`)
+      .set(authorization(ownerToken))
+      .expect(204);
+
+    const afterRevokeResponse = await request(app.getHttpServer())
+      .get('/folders/shared-with-me')
+      .set(authorization(targetToken))
+      .expect(200);
+
+    expect(afterRevokeResponse.body).toEqual([]);
+  });
+
+  it('allows EDITOR to modify a shared folder hierarchy', async () => {
+    const root = await createFolder(ownerToken, 'Editor Shared Root');
+
+    const destination = await createFolder(
+      ownerToken,
+      'Editor Destination',
+      root.id,
+    );
+
+    const grant = await prisma.folderAccessGrant.create({
+      data: {
+        folderId: root.id,
+        userId: otherUserId,
+        role: 'VIEWER',
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    await request(app.getHttpServer())
+      .post('/folders')
+      .set(authorization(otherUserToken))
+      .send({
+        name: 'Viewer Cannot Create',
+        parentId: root.id,
+      })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .patch(`/folders/${destination.id}`)
+      .set(authorization(otherUserToken))
+      .send({
+        name: 'Viewer Cannot Rename',
+      })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .patch(`/folders/${destination.id}/move`)
+      .set(authorization(otherUserToken))
+      .send({
+        parentId: root.id,
+      })
+      .expect(403);
+
+    await prisma.folderAccessGrant.update({
+      where: {
+        id: grant.id,
+      },
+      data: {
+        role: 'EDITOR',
+      },
+    });
+
+    const createdByEditor = await createFolder(
+      otherUserToken,
+      'Created By Editor',
+      root.id,
+    );
+
+    expect(createdByEditor.ownerId).toBe(root.ownerId);
+
+    expect(createdByEditor.parentId).toBe(root.id);
+
+    const renamed = await request(app.getHttpServer())
+      .patch(`/folders/${createdByEditor.id}`)
+      .set(authorization(otherUserToken))
+      .send({
+        name: 'Renamed By Editor',
+      })
+      .expect(200);
+
+    expect(renamed.body).toMatchObject({
+      id: createdByEditor.id,
+      name: 'Renamed By Editor',
+      ownerId: root.ownerId,
+    });
+
+    const moved = await request(app.getHttpServer())
+      .patch(`/folders/${createdByEditor.id}/move`)
+      .set(authorization(otherUserToken))
+      .send({
+        parentId: destination.id,
+      })
+      .expect(200);
+
+    expect(moved.body).toMatchObject({
+      id: createdByEditor.id,
+      parentId: destination.id,
+      ownerId: root.ownerId,
+    });
+
+    await request(app.getHttpServer())
+      .patch(`/folders/${createdByEditor.id}/move`)
+      .set(authorization(otherUserToken))
+      .send({
+        parentId: null,
+      })
+      .expect(403);
+
+    /*
+     * И delete пока остаётся OWNER-only.
+     */
+    await request(app.getHttpServer())
+      .delete(`/folders/${createdByEditor.id}`)
+      .set(authorization(otherUserToken))
+      .expect(403);
+  });
+
+  it('returns 403 when VIEWER tries to delete a shared folder', async () => {
+    const viewerEmail = createTestEmail('folders.viewer.delete');
+
+    const viewerToken = await registerAndLogin(viewerEmail);
+
+    const sharedFolder = await createFolder(
+      ownerToken,
+      'Viewer Delete Forbidden',
+    );
+
+    await request(app.getHttpServer())
+      .post(`/folders/${sharedFolder.id}/shares`)
+      .set(authorization(ownerToken))
+      .send({
+        email: viewerEmail,
+        role: 'VIEWER',
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .delete(`/folders/${sharedFolder.id}`)
+      .set(authorization(viewerToken))
+      .expect(403);
   });
 
   it('renames and moves folders while preventing cycles', async () => {

@@ -33,6 +33,16 @@ export type Folder = Prisma.FolderModel
  */
 export type File = Prisma.FileModel
 /**
+ * Model FolderAccessGrant
+ * 
+ */
+export type FolderAccessGrant = Prisma.FolderAccessGrantModel
+/**
+ * Model FileAccessGrant
+ * 
+ */
+export type FileAccessGrant = Prisma.FileAccessGrantModel
+/**
  * Model FileVersion
  * 
  */

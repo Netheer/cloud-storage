@@ -3,7 +3,9 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  ForbiddenException,
 } from '@nestjs/common';
+import { AccessService } from '../access/access.service';
 import { PrismaService } from '../database/prisma.service';
 import type { CreateFolderDto } from './dto/create-folder.dto';
 import type { FolderResponseDto } from './dto/folder-response.dto';
@@ -21,38 +23,79 @@ const FOLDER_SELECT = {
 
 @Injectable()
 export class FoldersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly accessService: AccessService,
+  ) {}
 
   async create(
-    ownerId: string,
+    userId: string,
     dto: CreateFolderDto,
   ): Promise<FolderResponseDto> {
     const parentId = dto.parentId ?? null;
 
-    if (parentId) {
-      await this.ensureOwnedFolderExists(ownerId, parentId);
+    if (!parentId) {
+      return this.prisma.folder.create({
+        data: {
+          name: dto.name,
+          ownerId: userId,
+          parentId: null,
+        },
+        select: FOLDER_SELECT,
+      });
+    }
+
+    await this.accessService.requireFolderRole(userId, parentId, 'EDITOR');
+
+    const parent: {
+      ownerId: string;
+    } | null = await this.prisma.folder.findUnique({
+      where: {
+        id: parentId,
+      },
+      select: {
+        ownerId: true,
+      },
+    });
+
+    if (!parent) {
+      throw new NotFoundException('Parent folder not found');
     }
 
     return this.prisma.folder.create({
       data: {
         name: dto.name,
-        ownerId,
+        ownerId: parent.ownerId,
         parentId,
       },
       select: FOLDER_SELECT,
     });
   }
 
-  async list(ownerId: string, parentId?: string): Promise<FolderResponseDto[]> {
+  async list(userId: string, parentId?: string): Promise<FolderResponseDto[]> {
     const normalizedParentId = parentId ?? null;
 
     if (parentId) {
-      await this.ensureOwnedFolderExists(ownerId, parentId);
-    }
+      await this.accessService.requireFolderRole(userId, parentId, 'VIEWER');
 
+      return this.prisma.folder.findMany({
+        where: {
+          parentId,
+        },
+        orderBy: [
+          {
+            name: 'asc',
+          },
+          {
+            createdAt: 'asc',
+          },
+        ],
+        select: FOLDER_SELECT,
+      });
+    }
     return this.prisma.folder.findMany({
       where: {
-        ownerId,
+        ownerId: userId,
         parentId: normalizedParentId,
       },
       orderBy: [
@@ -68,11 +111,11 @@ export class FoldersService {
   }
 
   async rename(
-    ownerId: string,
+    userId: string,
     folderId: string,
     dto: RenameFolderDto,
   ): Promise<FolderResponseDto> {
-    await this.ensureOwnedFolderExists(ownerId, folderId);
+    await this.accessService.requireFolderRole(userId, folderId, 'EDITOR');
 
     return this.prisma.folder.update({
       where: {
@@ -86,15 +129,73 @@ export class FoldersService {
   }
 
   async move(
-    ownerId: string,
+    userId: string,
     folderId: string,
     dto: MoveFolderDto,
   ): Promise<FolderResponseDto> {
-    await this.ensureOwnedFolderExists(ownerId, folderId);
+    await this.accessService.requireFolderRole(userId, folderId, 'EDITOR');
 
-    if (dto.parentId !== null) {
-      await this.ensureMoveDoesNotCreateCycle(ownerId, folderId, dto.parentId);
+    const sourceFolder: {
+      ownerId: string;
+    } | null = await this.prisma.folder.findUnique({
+      where: {
+        id: folderId,
+      },
+      select: {
+        ownerId: true,
+      },
+    });
+
+    if (!sourceFolder) {
+      throw new NotFoundException('Folder not found');
     }
+
+    if (dto.parentId === null) {
+      if (sourceFolder.ownerId !== userId) {
+        throw new ForbiddenException(
+          'Only the owner can move a folder to root',
+        );
+      }
+
+      return this.prisma.folder.update({
+        where: {
+          id: folderId,
+        },
+        data: {
+          parentId: null,
+        },
+        select: FOLDER_SELECT,
+      });
+    }
+
+    await this.accessService.requireFolderRole(userId, dto.parentId, 'EDITOR');
+
+    const destinationFolder: {
+      ownerId: string;
+    } | null = await this.prisma.folder.findUnique({
+      where: {
+        id: dto.parentId,
+      },
+      select: {
+        ownerId: true,
+      },
+    });
+
+    if (!destinationFolder) {
+      throw new NotFoundException('Destination folder not found');
+    }
+
+    if (destinationFolder.ownerId !== sourceFolder.ownerId) {
+      throw new BadRequestException(
+        'Folders with different owners cannot be combined',
+      );
+    }
+
+    await this.ensureMoveDoesNotCreateCycle(
+      sourceFolder.ownerId,
+      folderId,
+      dto.parentId,
+    );
 
     return this.prisma.folder.update({
       where: {
@@ -108,6 +209,7 @@ export class FoldersService {
   }
 
   async remove(ownerId: string, folderId: string): Promise<void> {
+    await this.accessService.requireFolderRole(ownerId, folderId, 'OWNER');
     const result = await this.prisma.folder.deleteMany({
       where: {
         id: folderId,
@@ -143,25 +245,6 @@ export class FoldersService {
     }
 
     throw new ConflictException('Folder is not empty');
-  }
-
-  private async ensureOwnedFolderExists(
-    ownerId: string,
-    folderId: string,
-  ): Promise<void> {
-    const folder = await this.prisma.folder.findFirst({
-      where: {
-        id: folderId,
-        ownerId,
-      },
-      select: {
-        id: true,
-      },
-    });
-
-    if (!folder) {
-      throw new NotFoundException('Folder not found');
-    }
   }
 
   private async ensureMoveDoesNotCreateCycle(

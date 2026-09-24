@@ -400,6 +400,8 @@ export const ModelName = {
   User: 'User',
   Folder: 'Folder',
   File: 'File',
+  FolderAccessGrant: 'FolderAccessGrant',
+  FileAccessGrant: 'FileAccessGrant',
   FileVersion: 'FileVersion',
   StoredObject: 'StoredObject',
   UploadSession: 'UploadSession',
@@ -421,7 +423,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "user" | "folder" | "file" | "fileVersion" | "storedObject" | "uploadSession" | "uploadPart" | "authSession" | "outboxEvent"
+    modelProps: "user" | "folder" | "file" | "folderAccessGrant" | "fileAccessGrant" | "fileVersion" | "storedObject" | "uploadSession" | "uploadPart" | "authSession" | "outboxEvent"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -644,6 +646,154 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         count: {
           args: Prisma.FileCountArgs<ExtArgs>
           result: runtime.Types.Utils.Optional<Prisma.FileCountAggregateOutputType> | number
+        }
+      }
+    }
+    FolderAccessGrant: {
+      payload: Prisma.$FolderAccessGrantPayload<ExtArgs>
+      fields: Prisma.FolderAccessGrantFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.FolderAccessGrantFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FolderAccessGrantPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.FolderAccessGrantFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FolderAccessGrantPayload>
+        }
+        findFirst: {
+          args: Prisma.FolderAccessGrantFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FolderAccessGrantPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.FolderAccessGrantFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FolderAccessGrantPayload>
+        }
+        findMany: {
+          args: Prisma.FolderAccessGrantFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FolderAccessGrantPayload>[]
+        }
+        create: {
+          args: Prisma.FolderAccessGrantCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FolderAccessGrantPayload>
+        }
+        createMany: {
+          args: Prisma.FolderAccessGrantCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.FolderAccessGrantCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FolderAccessGrantPayload>[]
+        }
+        delete: {
+          args: Prisma.FolderAccessGrantDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FolderAccessGrantPayload>
+        }
+        update: {
+          args: Prisma.FolderAccessGrantUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FolderAccessGrantPayload>
+        }
+        deleteMany: {
+          args: Prisma.FolderAccessGrantDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.FolderAccessGrantUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.FolderAccessGrantUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FolderAccessGrantPayload>[]
+        }
+        upsert: {
+          args: Prisma.FolderAccessGrantUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FolderAccessGrantPayload>
+        }
+        aggregate: {
+          args: Prisma.FolderAccessGrantAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateFolderAccessGrant>
+        }
+        groupBy: {
+          args: Prisma.FolderAccessGrantGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.FolderAccessGrantGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.FolderAccessGrantCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.FolderAccessGrantCountAggregateOutputType> | number
+        }
+      }
+    }
+    FileAccessGrant: {
+      payload: Prisma.$FileAccessGrantPayload<ExtArgs>
+      fields: Prisma.FileAccessGrantFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.FileAccessGrantFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FileAccessGrantPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.FileAccessGrantFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FileAccessGrantPayload>
+        }
+        findFirst: {
+          args: Prisma.FileAccessGrantFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FileAccessGrantPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.FileAccessGrantFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FileAccessGrantPayload>
+        }
+        findMany: {
+          args: Prisma.FileAccessGrantFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FileAccessGrantPayload>[]
+        }
+        create: {
+          args: Prisma.FileAccessGrantCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FileAccessGrantPayload>
+        }
+        createMany: {
+          args: Prisma.FileAccessGrantCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.FileAccessGrantCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FileAccessGrantPayload>[]
+        }
+        delete: {
+          args: Prisma.FileAccessGrantDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FileAccessGrantPayload>
+        }
+        update: {
+          args: Prisma.FileAccessGrantUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FileAccessGrantPayload>
+        }
+        deleteMany: {
+          args: Prisma.FileAccessGrantDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.FileAccessGrantUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.FileAccessGrantUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FileAccessGrantPayload>[]
+        }
+        upsert: {
+          args: Prisma.FileAccessGrantUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FileAccessGrantPayload>
+        }
+        aggregate: {
+          args: Prisma.FileAccessGrantAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateFileAccessGrant>
+        }
+        groupBy: {
+          args: Prisma.FileAccessGrantGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.FileAccessGrantGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.FileAccessGrantCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.FileAccessGrantCountAggregateOutputType> | number
         }
       }
     }
@@ -1169,6 +1319,30 @@ export const FileScalarFieldEnum = {
 export type FileScalarFieldEnum = (typeof FileScalarFieldEnum)[keyof typeof FileScalarFieldEnum]
 
 
+export const FolderAccessGrantScalarFieldEnum = {
+  id: 'id',
+  folderId: 'folderId',
+  userId: 'userId',
+  role: 'role',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type FolderAccessGrantScalarFieldEnum = (typeof FolderAccessGrantScalarFieldEnum)[keyof typeof FolderAccessGrantScalarFieldEnum]
+
+
+export const FileAccessGrantScalarFieldEnum = {
+  id: 'id',
+  fileId: 'fileId',
+  userId: 'userId',
+  role: 'role',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type FileAccessGrantScalarFieldEnum = (typeof FileAccessGrantScalarFieldEnum)[keyof typeof FileAccessGrantScalarFieldEnum]
+
+
 export const FileVersionScalarFieldEnum = {
   id: 'id',
   fileId: 'fileId',
@@ -1348,6 +1522,20 @@ export type EnumFileStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$Prism
  * Reference to a field of type 'FileStatus[]'
  */
 export type ListEnumFileStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'FileStatus[]'>
+    
+
+
+/**
+ * Reference to a field of type 'AccessRole'
+ */
+export type EnumAccessRoleFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'AccessRole'>
+    
+
+
+/**
+ * Reference to a field of type 'AccessRole[]'
+ */
+export type ListEnumAccessRoleFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'AccessRole[]'>
     
 
 
@@ -1574,6 +1762,8 @@ export type GlobalOmitConfig = {
   user?: Prisma.UserOmit
   folder?: Prisma.FolderOmit
   file?: Prisma.FileOmit
+  folderAccessGrant?: Prisma.FolderAccessGrantOmit
+  fileAccessGrant?: Prisma.FileAccessGrantOmit
   fileVersion?: Prisma.FileVersionOmit
   storedObject?: Prisma.StoredObjectOmit
   uploadSession?: Prisma.UploadSessionOmit

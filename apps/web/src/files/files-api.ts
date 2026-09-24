@@ -12,6 +12,16 @@ export interface StoredFile {
   updatedAt: string;
 }
 
+export interface StoredFileVersion {
+  id: string;
+  versionNumber: number;
+  originalName: string;
+  mimeType: string | null;
+  size: string;
+  createdAt: string;
+  isCurrent: boolean;
+}
+
 export interface FileDownload {
   url: string;
   expiresAt: string;
@@ -77,6 +87,13 @@ export interface InitiateMultipartUploadInput {
   mimeType?: string;
   totalSize: string;
   folderId: string | null;
+}
+
+export interface InitiateMultipartVersionUploadInput {
+  clientRequestId: string;
+  fileName: string;
+  mimeType?: string;
+  totalSize: string;
 }
 
 async function getErrorMessage(
@@ -153,6 +170,68 @@ export async function uploadFile(
     method: 'POST',
     body: formData,
   });
+
+  return readJson<StoredFile>(response);
+}
+
+export async function uploadFileVersion(
+  authFetch: AuthFetch,
+  fileId: string,
+  file: File,
+): Promise<StoredFile> {
+  const formData = new FormData();
+
+  formData.append('file', file);
+
+  const response = await authFetch(
+    `/files/${encodeURIComponent(fileId)}/versions`,
+    {
+      method: 'POST',
+      body: formData,
+    },
+  );
+
+  return readJson<StoredFile>(response);
+}
+
+export async function listFileVersions(
+  authFetch: AuthFetch,
+  fileId: string,
+): Promise<StoredFileVersion[]> {
+  const response = await authFetch(
+    `/files/${encodeURIComponent(fileId)}/versions`,
+  );
+
+  return readJson<StoredFileVersion[]>(response);
+}
+
+export async function createFileVersionDownload(
+  authFetch: AuthFetch,
+  fileId: string,
+  versionId: string,
+): Promise<FileDownload> {
+  const response = await authFetch(
+    `/files/${encodeURIComponent(fileId)}/versions/${encodeURIComponent(
+      versionId,
+    )}/download`,
+  );
+
+  return readJson<FileDownload>(response);
+}
+
+export async function restoreFileVersion(
+  authFetch: AuthFetch,
+  fileId: string,
+  versionId: string,
+): Promise<StoredFile> {
+  const response = await authFetch(
+    `/files/${encodeURIComponent(fileId)}/versions/${encodeURIComponent(
+      versionId,
+    )}/restore`,
+    {
+      method: 'POST',
+    },
+  );
 
   return readJson<StoredFile>(response);
 }
@@ -255,6 +334,32 @@ export async function initiateMultipartUpload(
     }),
     signal,
   });
+
+  return readJson<MultipartUploadSession>(response);
+}
+
+export async function initiateMultipartVersionUpload(
+  authFetch: AuthFetch,
+  fileId: string,
+  input: InitiateMultipartVersionUploadInput,
+  signal?: AbortSignal,
+): Promise<MultipartUploadSession> {
+  const response = await authFetch(
+    `/files/${encodeURIComponent(fileId)}/versions/multipart`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        clientRequestId: input.clientRequestId,
+        fileName: input.fileName,
+        mimeType: input.mimeType,
+        totalSize: input.totalSize,
+      }),
+      signal,
+    },
+  );
 
   return readJson<MultipartUploadSession>(response);
 }

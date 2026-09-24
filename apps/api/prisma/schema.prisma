@@ -33,6 +33,12 @@ enum UploadStatus {
   FAILED
 }
 
+enum AccessRole {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
 model User {
   id           String   @id @default(uuid()) @db.Uuid
   email        String   @unique
@@ -45,6 +51,8 @@ model User {
   files   File[]
   uploads UploadSession[]
   authSessions AuthSession[]
+  folderAccessGrants FolderAccessGrant[]
+  fileAccessGrants   FileAccessGrant[]
 }
 
 model Folder {
@@ -60,6 +68,7 @@ model Folder {
   children Folder[]   @relation("FolderHierarchy")
   files    File[]
   uploads  UploadSession[]
+  accessGrants FolderAccessGrant[]
 
   @@index([ownerId])
   @@index([parentId])
@@ -81,9 +90,40 @@ model File {
   versions       FileVersion[]   @relation("FileVersions")
   currentVersion FileVersion?    @relation("CurrentFileVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
   uploads        UploadSession[]
+  accessGrants FileAccessGrant[]
 
   @@index([ownerId])
   @@index([folderId])
+}
+
+model FolderAccessGrant {
+  id        String     @id @default(uuid()) @db.Uuid
+  folderId  String     @db.Uuid
+  userId    String     @db.Uuid
+  role      AccessRole
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  folder Folder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([folderId, userId])
+  @@index([userId])
+}
+
+model FileAccessGrant {
+  id        String     @id @default(uuid()) @db.Uuid
+  fileId    String     @db.Uuid
+  userId    String     @db.Uuid
+  role      AccessRole
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  file File @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([fileId, userId])
+  @@index([userId])
 }
 
 model FileVersion {
