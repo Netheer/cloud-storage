@@ -196,6 +196,7 @@ export type FolderWhereInput = {
   files?: Prisma.FileListRelationFilter
   uploads?: Prisma.UploadSessionListRelationFilter
   accessGrants?: Prisma.FolderAccessGrantListRelationFilter
+  publicLinks?: Prisma.FolderPublicLinkListRelationFilter
 }
 
 export type FolderOrderByWithRelationInput = {
@@ -211,6 +212,7 @@ export type FolderOrderByWithRelationInput = {
   files?: Prisma.FileOrderByRelationAggregateInput
   uploads?: Prisma.UploadSessionOrderByRelationAggregateInput
   accessGrants?: Prisma.FolderAccessGrantOrderByRelationAggregateInput
+  publicLinks?: Prisma.FolderPublicLinkOrderByRelationAggregateInput
 }
 
 export type FolderWhereUniqueInput = Prisma.AtLeast<{
@@ -229,6 +231,7 @@ export type FolderWhereUniqueInput = Prisma.AtLeast<{
   files?: Prisma.FileListRelationFilter
   uploads?: Prisma.UploadSessionListRelationFilter
   accessGrants?: Prisma.FolderAccessGrantListRelationFilter
+  publicLinks?: Prisma.FolderPublicLinkListRelationFilter
 }, "id">
 
 export type FolderOrderByWithAggregationInput = {
@@ -266,6 +269,7 @@ export type FolderCreateInput = {
   files?: Prisma.FileCreateNestedManyWithoutFolderInput
   uploads?: Prisma.UploadSessionCreateNestedManyWithoutFolderInput
   accessGrants?: Prisma.FolderAccessGrantCreateNestedManyWithoutFolderInput
+  publicLinks?: Prisma.FolderPublicLinkCreateNestedManyWithoutFolderInput
 }
 
 export type FolderUncheckedCreateInput = {
@@ -279,6 +283,7 @@ export type FolderUncheckedCreateInput = {
   files?: Prisma.FileUncheckedCreateNestedManyWithoutFolderInput
   uploads?: Prisma.UploadSessionUncheckedCreateNestedManyWithoutFolderInput
   accessGrants?: Prisma.FolderAccessGrantUncheckedCreateNestedManyWithoutFolderInput
+  publicLinks?: Prisma.FolderPublicLinkUncheckedCreateNestedManyWithoutFolderInput
 }
 
 export type FolderUpdateInput = {
@@ -292,6 +297,7 @@ export type FolderUpdateInput = {
   files?: Prisma.FileUpdateManyWithoutFolderNestedInput
   uploads?: Prisma.UploadSessionUpdateManyWithoutFolderNestedInput
   accessGrants?: Prisma.FolderAccessGrantUpdateManyWithoutFolderNestedInput
+  publicLinks?: Prisma.FolderPublicLinkUpdateManyWithoutFolderNestedInput
 }
 
 export type FolderUncheckedUpdateInput = {
@@ -305,6 +311,7 @@ export type FolderUncheckedUpdateInput = {
   files?: Prisma.FileUncheckedUpdateManyWithoutFolderNestedInput
   uploads?: Prisma.UploadSessionUncheckedUpdateManyWithoutFolderNestedInput
   accessGrants?: Prisma.FolderAccessGrantUncheckedUpdateManyWithoutFolderNestedInput
+  publicLinks?: Prisma.FolderPublicLinkUncheckedUpdateManyWithoutFolderNestedInput
 }
 
 export type FolderCreateManyInput = {
@@ -525,6 +532,20 @@ export type FolderUpdateOneWithoutUploadsNestedInput = {
   update?: Prisma.XOR<Prisma.XOR<Prisma.FolderUpdateToOneWithWhereWithoutUploadsInput, Prisma.FolderUpdateWithoutUploadsInput>, Prisma.FolderUncheckedUpdateWithoutUploadsInput>
 }
 
+export type FolderCreateNestedOneWithoutPublicLinksInput = {
+  create?: Prisma.XOR<Prisma.FolderCreateWithoutPublicLinksInput, Prisma.FolderUncheckedCreateWithoutPublicLinksInput>
+  connectOrCreate?: Prisma.FolderCreateOrConnectWithoutPublicLinksInput
+  connect?: Prisma.FolderWhereUniqueInput
+}
+
+export type FolderUpdateOneRequiredWithoutPublicLinksNestedInput = {
+  create?: Prisma.XOR<Prisma.FolderCreateWithoutPublicLinksInput, Prisma.FolderUncheckedCreateWithoutPublicLinksInput>
+  connectOrCreate?: Prisma.FolderCreateOrConnectWithoutPublicLinksInput
+  upsert?: Prisma.FolderUpsertWithoutPublicLinksInput
+  connect?: Prisma.FolderWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.FolderUpdateToOneWithWhereWithoutPublicLinksInput, Prisma.FolderUpdateWithoutPublicLinksInput>, Prisma.FolderUncheckedUpdateWithoutPublicLinksInput>
+}
+
 export type FolderCreateWithoutOwnerInput = {
   id?: string
   name: string
@@ -535,6 +556,7 @@ export type FolderCreateWithoutOwnerInput = {
   files?: Prisma.FileCreateNestedManyWithoutFolderInput
   uploads?: Prisma.UploadSessionCreateNestedManyWithoutFolderInput
   accessGrants?: Prisma.FolderAccessGrantCreateNestedManyWithoutFolderInput
+  publicLinks?: Prisma.FolderPublicLinkCreateNestedManyWithoutFolderInput
 }
 
 export type FolderUncheckedCreateWithoutOwnerInput = {
@@ -547,6 +569,7 @@ export type FolderUncheckedCreateWithoutOwnerInput = {
   files?: Prisma.FileUncheckedCreateNestedManyWithoutFolderInput
   uploads?: Prisma.UploadSessionUncheckedCreateNestedManyWithoutFolderInput
   accessGrants?: Prisma.FolderAccessGrantUncheckedCreateNestedManyWithoutFolderInput
+  publicLinks?: Prisma.FolderPublicLinkUncheckedCreateNestedManyWithoutFolderInput
 }
 
 export type FolderCreateOrConnectWithoutOwnerInput = {
@@ -597,6 +620,7 @@ export type FolderCreateWithoutChildrenInput = {
   files?: Prisma.FileCreateNestedManyWithoutFolderInput
   uploads?: Prisma.UploadSessionCreateNestedManyWithoutFolderInput
   accessGrants?: Prisma.FolderAccessGrantCreateNestedManyWithoutFolderInput
+  publicLinks?: Prisma.FolderPublicLinkCreateNestedManyWithoutFolderInput
 }
 
 export type FolderUncheckedCreateWithoutChildrenInput = {
@@ -609,6 +633,7 @@ export type FolderUncheckedCreateWithoutChildrenInput = {
   files?: Prisma.FileUncheckedCreateNestedManyWithoutFolderInput
   uploads?: Prisma.UploadSessionUncheckedCreateNestedManyWithoutFolderInput
   accessGrants?: Prisma.FolderAccessGrantUncheckedCreateNestedManyWithoutFolderInput
+  publicLinks?: Prisma.FolderPublicLinkUncheckedCreateNestedManyWithoutFolderInput
 }
 
 export type FolderCreateOrConnectWithoutChildrenInput = {
@@ -626,6 +651,7 @@ export type FolderCreateWithoutParentInput = {
   files?: Prisma.FileCreateNestedManyWithoutFolderInput
   uploads?: Prisma.UploadSessionCreateNestedManyWithoutFolderInput
   accessGrants?: Prisma.FolderAccessGrantCreateNestedManyWithoutFolderInput
+  publicLinks?: Prisma.FolderPublicLinkCreateNestedManyWithoutFolderInput
 }
 
 export type FolderUncheckedCreateWithoutParentInput = {
@@ -638,6 +664,7 @@ export type FolderUncheckedCreateWithoutParentInput = {
   files?: Prisma.FileUncheckedCreateNestedManyWithoutFolderInput
   uploads?: Prisma.UploadSessionUncheckedCreateNestedManyWithoutFolderInput
   accessGrants?: Prisma.FolderAccessGrantUncheckedCreateNestedManyWithoutFolderInput
+  publicLinks?: Prisma.FolderPublicLinkUncheckedCreateNestedManyWithoutFolderInput
 }
 
 export type FolderCreateOrConnectWithoutParentInput = {
@@ -671,6 +698,7 @@ export type FolderUpdateWithoutChildrenInput = {
   files?: Prisma.FileUpdateManyWithoutFolderNestedInput
   uploads?: Prisma.UploadSessionUpdateManyWithoutFolderNestedInput
   accessGrants?: Prisma.FolderAccessGrantUpdateManyWithoutFolderNestedInput
+  publicLinks?: Prisma.FolderPublicLinkUpdateManyWithoutFolderNestedInput
 }
 
 export type FolderUncheckedUpdateWithoutChildrenInput = {
@@ -683,6 +711,7 @@ export type FolderUncheckedUpdateWithoutChildrenInput = {
   files?: Prisma.FileUncheckedUpdateManyWithoutFolderNestedInput
   uploads?: Prisma.UploadSessionUncheckedUpdateManyWithoutFolderNestedInput
   accessGrants?: Prisma.FolderAccessGrantUncheckedUpdateManyWithoutFolderNestedInput
+  publicLinks?: Prisma.FolderPublicLinkUncheckedUpdateManyWithoutFolderNestedInput
 }
 
 export type FolderUpsertWithWhereUniqueWithoutParentInput = {
@@ -711,6 +740,7 @@ export type FolderCreateWithoutFilesInput = {
   children?: Prisma.FolderCreateNestedManyWithoutParentInput
   uploads?: Prisma.UploadSessionCreateNestedManyWithoutFolderInput
   accessGrants?: Prisma.FolderAccessGrantCreateNestedManyWithoutFolderInput
+  publicLinks?: Prisma.FolderPublicLinkCreateNestedManyWithoutFolderInput
 }
 
 export type FolderUncheckedCreateWithoutFilesInput = {
@@ -723,6 +753,7 @@ export type FolderUncheckedCreateWithoutFilesInput = {
   children?: Prisma.FolderUncheckedCreateNestedManyWithoutParentInput
   uploads?: Prisma.UploadSessionUncheckedCreateNestedManyWithoutFolderInput
   accessGrants?: Prisma.FolderAccessGrantUncheckedCreateNestedManyWithoutFolderInput
+  publicLinks?: Prisma.FolderPublicLinkUncheckedCreateNestedManyWithoutFolderInput
 }
 
 export type FolderCreateOrConnectWithoutFilesInput = {
@@ -751,6 +782,7 @@ export type FolderUpdateWithoutFilesInput = {
   children?: Prisma.FolderUpdateManyWithoutParentNestedInput
   uploads?: Prisma.UploadSessionUpdateManyWithoutFolderNestedInput
   accessGrants?: Prisma.FolderAccessGrantUpdateManyWithoutFolderNestedInput
+  publicLinks?: Prisma.FolderPublicLinkUpdateManyWithoutFolderNestedInput
 }
 
 export type FolderUncheckedUpdateWithoutFilesInput = {
@@ -763,6 +795,7 @@ export type FolderUncheckedUpdateWithoutFilesInput = {
   children?: Prisma.FolderUncheckedUpdateManyWithoutParentNestedInput
   uploads?: Prisma.UploadSessionUncheckedUpdateManyWithoutFolderNestedInput
   accessGrants?: Prisma.FolderAccessGrantUncheckedUpdateManyWithoutFolderNestedInput
+  publicLinks?: Prisma.FolderPublicLinkUncheckedUpdateManyWithoutFolderNestedInput
 }
 
 export type FolderCreateWithoutAccessGrantsInput = {
@@ -775,6 +808,7 @@ export type FolderCreateWithoutAccessGrantsInput = {
   children?: Prisma.FolderCreateNestedManyWithoutParentInput
   files?: Prisma.FileCreateNestedManyWithoutFolderInput
   uploads?: Prisma.UploadSessionCreateNestedManyWithoutFolderInput
+  publicLinks?: Prisma.FolderPublicLinkCreateNestedManyWithoutFolderInput
 }
 
 export type FolderUncheckedCreateWithoutAccessGrantsInput = {
@@ -787,6 +821,7 @@ export type FolderUncheckedCreateWithoutAccessGrantsInput = {
   children?: Prisma.FolderUncheckedCreateNestedManyWithoutParentInput
   files?: Prisma.FileUncheckedCreateNestedManyWithoutFolderInput
   uploads?: Prisma.UploadSessionUncheckedCreateNestedManyWithoutFolderInput
+  publicLinks?: Prisma.FolderPublicLinkUncheckedCreateNestedManyWithoutFolderInput
 }
 
 export type FolderCreateOrConnectWithoutAccessGrantsInput = {
@@ -815,6 +850,7 @@ export type FolderUpdateWithoutAccessGrantsInput = {
   children?: Prisma.FolderUpdateManyWithoutParentNestedInput
   files?: Prisma.FileUpdateManyWithoutFolderNestedInput
   uploads?: Prisma.UploadSessionUpdateManyWithoutFolderNestedInput
+  publicLinks?: Prisma.FolderPublicLinkUpdateManyWithoutFolderNestedInput
 }
 
 export type FolderUncheckedUpdateWithoutAccessGrantsInput = {
@@ -827,6 +863,7 @@ export type FolderUncheckedUpdateWithoutAccessGrantsInput = {
   children?: Prisma.FolderUncheckedUpdateManyWithoutParentNestedInput
   files?: Prisma.FileUncheckedUpdateManyWithoutFolderNestedInput
   uploads?: Prisma.UploadSessionUncheckedUpdateManyWithoutFolderNestedInput
+  publicLinks?: Prisma.FolderPublicLinkUncheckedUpdateManyWithoutFolderNestedInput
 }
 
 export type FolderCreateWithoutUploadsInput = {
@@ -839,6 +876,7 @@ export type FolderCreateWithoutUploadsInput = {
   children?: Prisma.FolderCreateNestedManyWithoutParentInput
   files?: Prisma.FileCreateNestedManyWithoutFolderInput
   accessGrants?: Prisma.FolderAccessGrantCreateNestedManyWithoutFolderInput
+  publicLinks?: Prisma.FolderPublicLinkCreateNestedManyWithoutFolderInput
 }
 
 export type FolderUncheckedCreateWithoutUploadsInput = {
@@ -851,6 +889,7 @@ export type FolderUncheckedCreateWithoutUploadsInput = {
   children?: Prisma.FolderUncheckedCreateNestedManyWithoutParentInput
   files?: Prisma.FileUncheckedCreateNestedManyWithoutFolderInput
   accessGrants?: Prisma.FolderAccessGrantUncheckedCreateNestedManyWithoutFolderInput
+  publicLinks?: Prisma.FolderPublicLinkUncheckedCreateNestedManyWithoutFolderInput
 }
 
 export type FolderCreateOrConnectWithoutUploadsInput = {
@@ -879,6 +918,7 @@ export type FolderUpdateWithoutUploadsInput = {
   children?: Prisma.FolderUpdateManyWithoutParentNestedInput
   files?: Prisma.FileUpdateManyWithoutFolderNestedInput
   accessGrants?: Prisma.FolderAccessGrantUpdateManyWithoutFolderNestedInput
+  publicLinks?: Prisma.FolderPublicLinkUpdateManyWithoutFolderNestedInput
 }
 
 export type FolderUncheckedUpdateWithoutUploadsInput = {
@@ -890,6 +930,75 @@ export type FolderUncheckedUpdateWithoutUploadsInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   children?: Prisma.FolderUncheckedUpdateManyWithoutParentNestedInput
   files?: Prisma.FileUncheckedUpdateManyWithoutFolderNestedInput
+  accessGrants?: Prisma.FolderAccessGrantUncheckedUpdateManyWithoutFolderNestedInput
+  publicLinks?: Prisma.FolderPublicLinkUncheckedUpdateManyWithoutFolderNestedInput
+}
+
+export type FolderCreateWithoutPublicLinksInput = {
+  id?: string
+  name: string
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  owner: Prisma.UserCreateNestedOneWithoutFoldersInput
+  parent?: Prisma.FolderCreateNestedOneWithoutChildrenInput
+  children?: Prisma.FolderCreateNestedManyWithoutParentInput
+  files?: Prisma.FileCreateNestedManyWithoutFolderInput
+  uploads?: Prisma.UploadSessionCreateNestedManyWithoutFolderInput
+  accessGrants?: Prisma.FolderAccessGrantCreateNestedManyWithoutFolderInput
+}
+
+export type FolderUncheckedCreateWithoutPublicLinksInput = {
+  id?: string
+  name: string
+  ownerId: string
+  parentId?: string | null
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  children?: Prisma.FolderUncheckedCreateNestedManyWithoutParentInput
+  files?: Prisma.FileUncheckedCreateNestedManyWithoutFolderInput
+  uploads?: Prisma.UploadSessionUncheckedCreateNestedManyWithoutFolderInput
+  accessGrants?: Prisma.FolderAccessGrantUncheckedCreateNestedManyWithoutFolderInput
+}
+
+export type FolderCreateOrConnectWithoutPublicLinksInput = {
+  where: Prisma.FolderWhereUniqueInput
+  create: Prisma.XOR<Prisma.FolderCreateWithoutPublicLinksInput, Prisma.FolderUncheckedCreateWithoutPublicLinksInput>
+}
+
+export type FolderUpsertWithoutPublicLinksInput = {
+  update: Prisma.XOR<Prisma.FolderUpdateWithoutPublicLinksInput, Prisma.FolderUncheckedUpdateWithoutPublicLinksInput>
+  create: Prisma.XOR<Prisma.FolderCreateWithoutPublicLinksInput, Prisma.FolderUncheckedCreateWithoutPublicLinksInput>
+  where?: Prisma.FolderWhereInput
+}
+
+export type FolderUpdateToOneWithWhereWithoutPublicLinksInput = {
+  where?: Prisma.FolderWhereInput
+  data: Prisma.XOR<Prisma.FolderUpdateWithoutPublicLinksInput, Prisma.FolderUncheckedUpdateWithoutPublicLinksInput>
+}
+
+export type FolderUpdateWithoutPublicLinksInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  owner?: Prisma.UserUpdateOneRequiredWithoutFoldersNestedInput
+  parent?: Prisma.FolderUpdateOneWithoutChildrenNestedInput
+  children?: Prisma.FolderUpdateManyWithoutParentNestedInput
+  files?: Prisma.FileUpdateManyWithoutFolderNestedInput
+  uploads?: Prisma.UploadSessionUpdateManyWithoutFolderNestedInput
+  accessGrants?: Prisma.FolderAccessGrantUpdateManyWithoutFolderNestedInput
+}
+
+export type FolderUncheckedUpdateWithoutPublicLinksInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  ownerId?: Prisma.StringFieldUpdateOperationsInput | string
+  parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  children?: Prisma.FolderUncheckedUpdateManyWithoutParentNestedInput
+  files?: Prisma.FileUncheckedUpdateManyWithoutFolderNestedInput
+  uploads?: Prisma.UploadSessionUncheckedUpdateManyWithoutFolderNestedInput
   accessGrants?: Prisma.FolderAccessGrantUncheckedUpdateManyWithoutFolderNestedInput
 }
 
@@ -911,6 +1020,7 @@ export type FolderUpdateWithoutOwnerInput = {
   files?: Prisma.FileUpdateManyWithoutFolderNestedInput
   uploads?: Prisma.UploadSessionUpdateManyWithoutFolderNestedInput
   accessGrants?: Prisma.FolderAccessGrantUpdateManyWithoutFolderNestedInput
+  publicLinks?: Prisma.FolderPublicLinkUpdateManyWithoutFolderNestedInput
 }
 
 export type FolderUncheckedUpdateWithoutOwnerInput = {
@@ -923,6 +1033,7 @@ export type FolderUncheckedUpdateWithoutOwnerInput = {
   files?: Prisma.FileUncheckedUpdateManyWithoutFolderNestedInput
   uploads?: Prisma.UploadSessionUncheckedUpdateManyWithoutFolderNestedInput
   accessGrants?: Prisma.FolderAccessGrantUncheckedUpdateManyWithoutFolderNestedInput
+  publicLinks?: Prisma.FolderPublicLinkUncheckedUpdateManyWithoutFolderNestedInput
 }
 
 export type FolderUncheckedUpdateManyWithoutOwnerInput = {
@@ -951,6 +1062,7 @@ export type FolderUpdateWithoutParentInput = {
   files?: Prisma.FileUpdateManyWithoutFolderNestedInput
   uploads?: Prisma.UploadSessionUpdateManyWithoutFolderNestedInput
   accessGrants?: Prisma.FolderAccessGrantUpdateManyWithoutFolderNestedInput
+  publicLinks?: Prisma.FolderPublicLinkUpdateManyWithoutFolderNestedInput
 }
 
 export type FolderUncheckedUpdateWithoutParentInput = {
@@ -963,6 +1075,7 @@ export type FolderUncheckedUpdateWithoutParentInput = {
   files?: Prisma.FileUncheckedUpdateManyWithoutFolderNestedInput
   uploads?: Prisma.UploadSessionUncheckedUpdateManyWithoutFolderNestedInput
   accessGrants?: Prisma.FolderAccessGrantUncheckedUpdateManyWithoutFolderNestedInput
+  publicLinks?: Prisma.FolderPublicLinkUncheckedUpdateManyWithoutFolderNestedInput
 }
 
 export type FolderUncheckedUpdateManyWithoutParentInput = {
@@ -983,6 +1096,7 @@ export type FolderCountOutputType = {
   files: number
   uploads: number
   accessGrants: number
+  publicLinks: number
 }
 
 export type FolderCountOutputTypeSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
@@ -990,6 +1104,7 @@ export type FolderCountOutputTypeSelect<ExtArgs extends runtime.Types.Extensions
   files?: boolean | FolderCountOutputTypeCountFilesArgs
   uploads?: boolean | FolderCountOutputTypeCountUploadsArgs
   accessGrants?: boolean | FolderCountOutputTypeCountAccessGrantsArgs
+  publicLinks?: boolean | FolderCountOutputTypeCountPublicLinksArgs
 }
 
 /**
@@ -1030,6 +1145,13 @@ export type FolderCountOutputTypeCountAccessGrantsArgs<ExtArgs extends runtime.T
   where?: Prisma.FolderAccessGrantWhereInput
 }
 
+/**
+ * FolderCountOutputType without action
+ */
+export type FolderCountOutputTypeCountPublicLinksArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.FolderPublicLinkWhereInput
+}
+
 
 export type FolderSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
@@ -1044,6 +1166,7 @@ export type FolderSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs =
   files?: boolean | Prisma.Folder$filesArgs<ExtArgs>
   uploads?: boolean | Prisma.Folder$uploadsArgs<ExtArgs>
   accessGrants?: boolean | Prisma.Folder$accessGrantsArgs<ExtArgs>
+  publicLinks?: boolean | Prisma.Folder$publicLinksArgs<ExtArgs>
   _count?: boolean | Prisma.FolderCountOutputTypeDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["folder"]>
 
@@ -1086,6 +1209,7 @@ export type FolderInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs 
   files?: boolean | Prisma.Folder$filesArgs<ExtArgs>
   uploads?: boolean | Prisma.Folder$uploadsArgs<ExtArgs>
   accessGrants?: boolean | Prisma.Folder$accessGrantsArgs<ExtArgs>
+  publicLinks?: boolean | Prisma.Folder$publicLinksArgs<ExtArgs>
   _count?: boolean | Prisma.FolderCountOutputTypeDefaultArgs<ExtArgs>
 }
 export type FolderIncludeCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
@@ -1106,6 +1230,7 @@ export type $FolderPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs
     files: Prisma.$FilePayload<ExtArgs>[]
     uploads: Prisma.$UploadSessionPayload<ExtArgs>[]
     accessGrants: Prisma.$FolderAccessGrantPayload<ExtArgs>[]
+    publicLinks: Prisma.$FolderPublicLinkPayload<ExtArgs>[]
   }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
@@ -1514,6 +1639,7 @@ export interface Prisma__FolderClient<T, Null = never, ExtArgs extends runtime.T
   files<T extends Prisma.Folder$filesArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Folder$filesArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$FilePayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   uploads<T extends Prisma.Folder$uploadsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Folder$uploadsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$UploadSessionPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   accessGrants<T extends Prisma.Folder$accessGrantsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Folder$accessGrantsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$FolderAccessGrantPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  publicLinks<T extends Prisma.Folder$publicLinksArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Folder$publicLinksArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$FolderPublicLinkPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   /**
    * Attaches callbacks for the resolution and/or rejection of the Promise.
    * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -2062,6 +2188,30 @@ export type Folder$accessGrantsArgs<ExtArgs extends runtime.Types.Extensions.Int
   take?: number
   skip?: number
   distinct?: Prisma.FolderAccessGrantScalarFieldEnum | Prisma.FolderAccessGrantScalarFieldEnum[]
+}
+
+/**
+ * Folder.publicLinks
+ */
+export type Folder$publicLinksArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the FolderPublicLink
+   */
+  select?: Prisma.FolderPublicLinkSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the FolderPublicLink
+   */
+  omit?: Prisma.FolderPublicLinkOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.FolderPublicLinkInclude<ExtArgs> | null
+  where?: Prisma.FolderPublicLinkWhereInput
+  orderBy?: Prisma.FolderPublicLinkOrderByWithRelationInput | Prisma.FolderPublicLinkOrderByWithRelationInput[]
+  cursor?: Prisma.FolderPublicLinkWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.FolderPublicLinkScalarFieldEnum | Prisma.FolderPublicLinkScalarFieldEnum[]
 }
 
 /**

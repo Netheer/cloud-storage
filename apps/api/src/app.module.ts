@@ -9,6 +9,7 @@ import { AuthModule } from './auth/auth.module';
 import { FoldersModule } from './folders/folders.module';
 import { FilesModule } from './files/files.module';
 import { OutboxModule } from './outbox/outbox.module';
+import { PublicLinksModule } from './public-links/public-links.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { OutboxModule } from './outbox/outbox.module';
     FoldersModule,
     FilesModule,
     OutboxModule,
+    PublicLinksModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -39,6 +39,7 @@ import {
 import { FileVersionsDialog } from '../files/FileVersionsDialog';
 import { ShareDialog } from '../access/ShareDialog';
 import { listSharedFolders } from '../access/sharing-api';
+import { PublicLinkDialog } from '../access/PublicLinkDialog';
 
 type Breadcrumb = {
   id: string;
@@ -271,6 +272,11 @@ const userInitial =
 
     const [shareTarget, setShareTarget] =
   useState<ShareTarget | null>(null);
+
+  const [
+  publicLinkTarget,
+  setPublicLinkTarget,
+] = useState<ShareTarget | null>(null);
   
     const handleOpenFolderShareDialog = (
   folder: Folder,
@@ -982,6 +988,30 @@ const handleOpenFileDeleteDialog = (
   setFileToDelete(file);
 };
 
+const handleOpenFolderPublicLinkDialog = (
+  folder: Folder,
+) => {
+  setActiveMenuId(null);
+
+  setPublicLinkTarget({
+    type: 'folder',
+    id: folder.id,
+    name: folder.name,
+  });
+};
+
+const handleOpenFilePublicLinkDialog = (
+  file: StoredFile,
+) => {
+  setActiveFileMenuId(null);
+
+  setPublicLinkTarget({
+    type: 'file',
+    id: file.id,
+    name: file.name,
+  });
+};
+
 const handleDeleteFile = async () => {
   if (!fileToDelete) {
     return;
@@ -1459,6 +1489,19 @@ const handleMoveFile = async (
   </button>
 )}
 
+{user?.id === folder.ownerId && (
+  <button
+    type="button"
+    onClick={() =>
+      handleOpenFolderPublicLinkDialog(
+        folder,
+      )
+    }
+  >
+    Публичная ссылка
+  </button>
+)}
+
           {user?.id === folder.ownerId && (
   <button
     className="folder-card__delete-action"
@@ -1629,6 +1672,17 @@ const handleMoveFile = async (
   </button>
 )}
 
+{user?.id === file.ownerId && (
+  <button
+    type="button"
+    onClick={() =>
+      handleOpenFilePublicLinkDialog(file)
+    }
+  >
+    Публичная ссылка
+  </button>
+)}
+
   {user?.id === file.ownerId && (
   <button
     className="folder-card__delete-action"
@@ -1771,6 +1825,18 @@ const handleMoveFile = async (
     resourceName={shareTarget.name}
     authFetch={authFetch}
     onClose={() => setShareTarget(null)}
+  />
+)}
+
+{publicLinkTarget && (
+  <PublicLinkDialog
+    resourceType={publicLinkTarget.type}
+    resourceId={publicLinkTarget.id}
+    resourceName={publicLinkTarget.name}
+    authFetch={authFetch}
+    onClose={() =>
+      setPublicLinkTarget(null)
+    }
   />
 )}
 

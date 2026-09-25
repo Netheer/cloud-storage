@@ -94,3 +94,13 @@ export type AuthSession = Prisma.AuthSessionModel
  * 
  */
 export type OutboxEvent = Prisma.OutboxEventModel
+/**
+ * Model FolderPublicLink
+ * 
+ */
+export type FolderPublicLink = Prisma.FolderPublicLinkModel
+/**
+ * Model FilePublicLink
+ * 
+ */
+export type FilePublicLink = Prisma.FilePublicLinkModel

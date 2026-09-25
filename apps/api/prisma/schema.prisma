@@ -69,6 +69,8 @@ model Folder {
   files    File[]
   uploads  UploadSession[]
   accessGrants FolderAccessGrant[]
+  
+  publicLinks FolderPublicLink[]
 
   @@index([ownerId])
   @@index([parentId])
@@ -91,6 +93,8 @@ model File {
   currentVersion FileVersion?    @relation("CurrentFileVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
   uploads        UploadSession[]
   accessGrants FileAccessGrant[]
+
+  publicLinks FilePublicLink[]
 
   @@index([ownerId])
   @@index([folderId])
@@ -234,4 +238,34 @@ model OutboxEvent {
   lastError   String?
 
   @@index([publishedAt, createdAt])
+}
+
+model FolderPublicLink {
+  id        String    @id @default(uuid()) @db.Uuid
+  folderId  String    @db.Uuid
+  tokenHash String    @unique
+  expiresAt DateTime?
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  folder Folder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+
+  @@index([folderId])
+  @@index([expiresAt])
+}
+
+model FilePublicLink {
+  id        String    @id @default(uuid()) @db.Uuid
+  fileId    String    @db.Uuid
+  tokenHash String    @unique
+  expiresAt DateTime?
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  file File @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([fileId])
+  @@index([expiresAt])
 }

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
@@ -246,52 +246,53 @@ describe('Files (e2e)', () => {
   }
 
   async function createFolder(
-    accessToken: string,
-    name: string,
-  ): Promise<string> {
-    const response = await request(app.getHttpServer())
-      .post('/folders')
-      .set(authorization(accessToken))
-      .send({
-        name,
-        parentId: null,
-      })
-      .expect(201);
+  accessToken: string,
+  name: string,
+  parentId: string | null = null,
+): Promise<string> {
+  const response = await request(app.getHttpServer())
+    .post('/folders')
+    .set(authorization(accessToken))
+    .send({
+      name,
+      parentId,
+    })
+    .expect(201);
 
-    const body = response.body as {
-      id?: unknown;
-    };
+  const body = response.body as {
+    id?: unknown;
+  };
 
-    if (typeof body.id !== 'string') {
-      throw new Error('Folder ID is missing');
-    }
-
-    return body.id;
+  if (typeof body.id !== 'string') {
+    throw new Error('Folder ID is missing');
   }
 
-  async function uploadFile(
-    accessToken: string,
-    fileName: string,
-    content: Buffer,
-    folderId?: string,
-  ): Promise<FileBody> {
-    const uploadRequest = request(app.getHttpServer())
-      .post('/files/upload')
-      .set(authorization(accessToken));
+  return body.id;
+}
 
-    if (folderId) {
-      uploadRequest.field('folderId', folderId);
-    }
+async function uploadFile(
+  accessToken: string,
+  fileName: string,
+  content: Buffer,
+  folderId?: string,
+): Promise<FileBody> {
+  const uploadRequest = request(app.getHttpServer())
+    .post('/files/upload')
+    .set(authorization(accessToken));
 
-    const response = await uploadRequest
-      .attach('file', content, {
-        filename: fileName,
-        contentType: 'text/plain',
-      })
-      .expect(201);
-
-    return response.body as FileBody;
+  if (folderId) {
+    uploadRequest.field('folderId', folderId);
   }
+
+  const response = await uploadRequest
+    .attach('file', content, {
+      filename: fileName,
+      contentType: 'text/plain',
+    })
+    .expect(201);
+
+  return response.body as FileBody;
+}
 
   async function markFileReady(fileId: string): Promise<void> {
     await prisma.file.update({
@@ -4458,4 +4459,660 @@ describe('Files (e2e)', () => {
       .set(authorization(targetUser.accessToken))
       .expect(200);
   });
+
+  it('manages file public link lifecycle for the owner', async () => {
+    const file = await uploadFile(
+      owner.accessToken,
+      'public-link-file.txt',
+      Buffer.from('Public link content'),
+    );
+
+    await markFileReady(file.id);
+
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+    const createResponse = await request(app.getHttpServer())
+      .post(`/files/${file.id}/public-links`)
+      .set(authorization(owner.accessToken))
+      .send({
+        expiresAt,
+      })
+      .expect(201);
+
+    const createdLink = createResponse.body as {
+      id?: unknown;
+      token?: unknown;
+      expiresAt?: unknown;
+      revokedAt?: unknown;
+      createdAt?: unknown;
+    };
+
+    if (typeof createdLink.id !== 'string') {
+      throw new Error('Created public link ID is missing');
+    }
+
+    if (typeof createdLink.token !== 'string') {
+      throw new Error('Created public link token is missing');
+    }
+
+    expect(createdLink.expiresAt).toBe(expiresAt);
+    expect(createdLink.revokedAt).toBeNull();
+    expect(typeof createdLink.createdAt).toBe('string');
+
+    const storedLink = await prisma.filePublicLink.findUnique({
+      where: {
+        id: createdLink.id,
+      },
+      select: {
+        tokenHash: true,
+        revokedAt: true,
+      },
+    });
+
+    expect(storedLink).not.toBeNull();
+
+    const expectedTokenHash = createHash('sha256')
+      .update(createdLink.token)
+      .digest('hex');
+
+    expect(storedLink?.tokenHash).toBe(expectedTokenHash);
+
+    expect(storedLink?.tokenHash).not.toBe(createdLink.token);
+
+    const listResponse = await request(app.getHttpServer())
+      .get(`/files/${file.id}/public-links`)
+      .set(authorization(owner.accessToken))
+      .expect(200);
+
+    const listedLinks = listResponse.body as Array<Record<string, unknown>>;
+
+    const listedLink = listedLinks.find((link) => link.id === createdLink.id);
+
+    expect(listedLink).toEqual(
+      expect.objectContaining({
+        id: createdLink.id,
+        revokedAt: null,
+      }),
+    );
+
+    expect(listedLink).not.toHaveProperty('token');
+
+    expect(listedLink).not.toHaveProperty('tokenHash');
+
+    await request(app.getHttpServer())
+      .delete(`/files/${file.id}/public-links/${createdLink.id}`)
+      .set(authorization(owner.accessToken))
+      .expect(204);
+
+    const revokedLink = await prisma.filePublicLink.findUnique({
+      where: {
+        id: createdLink.id,
+      },
+      select: {
+        revokedAt: true,
+      },
+    });
+
+    expect(revokedLink?.revokedAt).toBeInstanceOf(Date);
+
+    await request(app.getHttpServer())
+      .delete(`/files/${file.id}/public-links/${createdLink.id}`)
+      .set(authorization(owner.accessToken))
+      .expect(204);
+  });
+
+  it('allows only OWNER to manage file public links', async () => {
+    const viewerEmail = createTestEmail('files.public-link.viewer');
+
+    const viewer = await registerAndLogin(viewerEmail);
+
+    const file = await uploadFile(
+      owner.accessToken,
+      'owner-public-link-file.txt',
+      Buffer.from('Owner content'),
+    );
+
+    await markFileReady(file.id);
+
+    await request(app.getHttpServer())
+      .post(`/files/${file.id}/shares`)
+      .set(authorization(owner.accessToken))
+      .send({
+        email: viewerEmail,
+        role: 'VIEWER',
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/files/${file.id}/public-links`)
+      .set(authorization(viewer.accessToken))
+      .send({})
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .get(`/files/${file.id}/public-links`)
+      .set(authorization(viewer.accessToken))
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .get(`/files/${file.id}/public-links`)
+      .set(authorization(otherUser.accessToken))
+      .expect(404);
+
+    await request(app.getHttpServer())
+      .post(`/files/${file.id}/public-links`)
+      .set(authorization(owner.accessToken))
+      .send({
+        expiresAt: new Date(Date.now() - 60_000).toISOString(),
+      })
+      .expect(400);
+  });
+
+  it('provides public file metadata and download without authentication', async () => {
+    const content = Buffer.from('Public file download content');
+
+    const file = await uploadFile(
+      owner.accessToken,
+      'public-download.txt',
+      content,
+    );
+
+    await markFileReady(file.id);
+
+    const createResponse = await request(app.getHttpServer())
+      .post(`/files/${file.id}/public-links`)
+      .set(authorization(owner.accessToken))
+      .send({})
+      .expect(201);
+
+    const publicLink = createResponse.body as {
+      id?: unknown;
+      token?: unknown;
+    };
+
+    if (typeof publicLink.token !== 'string') {
+      throw new Error('Public link token is missing');
+    }
+
+    const metadataResponse = await request(app.getHttpServer())
+      .get(`/public/files/${publicLink.token}`)
+      .expect(200);
+
+    expect(metadataResponse.body).toMatchObject({
+      id: file.id,
+      name: 'public-download.txt',
+      mimeType: 'text/plain',
+      size: content.length.toString(),
+    });
+
+    expect(metadataResponse.body).not.toHaveProperty('ownerId');
+
+    expect(metadataResponse.body).not.toHaveProperty('folderId');
+
+    const downloadResponse = await request(app.getHttpServer())
+      .get(`/public/files/${publicLink.token}/download`)
+      .expect(200);
+
+    const downloadBody = downloadResponse.body as {
+      url?: unknown;
+      expiresAt?: unknown;
+    };
+
+    expect(downloadBody.url).toBe('https://storage.test/download');
+
+    expect(typeof downloadBody.expiresAt).toBe('string');
+
+    expect(createPresignedDownloadUrlMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        downloadFileName: 'public-download.txt',
+        contentType: 'text/plain',
+        expiresInSeconds: 600,
+      }),
+    );
+  });
+
+  it('returns 404 for invalid, expired and revoked public file links', async () => {
+    await request(app.getHttpServer())
+      .get('/public/files/invalid-public-token')
+      .expect(404);
+
+    const file = await uploadFile(
+      owner.accessToken,
+      'public-link-invalid-states.txt',
+      Buffer.from('Public link states'),
+    );
+
+    await markFileReady(file.id);
+
+    // Создаём ссылку, которую затем искусственно
+    // делаем просроченной в БД.
+    const expiringResponse = await request(app.getHttpServer())
+      .post(`/files/${file.id}/public-links`)
+      .set(authorization(owner.accessToken))
+      .send({
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      })
+      .expect(201);
+
+    const expiringLink = expiringResponse.body as {
+      id?: unknown;
+      token?: unknown;
+    };
+
+    if (
+      typeof expiringLink.id !== 'string' ||
+      typeof expiringLink.token !== 'string'
+    ) {
+      throw new Error('Expiring public link data is missing');
+    }
+
+    await prisma.filePublicLink.update({
+      where: {
+        id: expiringLink.id,
+      },
+      data: {
+        expiresAt: new Date(Date.now() - 60_000),
+      },
+    });
+
+    await request(app.getHttpServer())
+      .get(`/public/files/${expiringLink.token}`)
+      .expect(404);
+
+    // Теперь отдельно проверяем revoke.
+    const revokedResponse = await request(app.getHttpServer())
+      .post(`/files/${file.id}/public-links`)
+      .set(authorization(owner.accessToken))
+      .send({})
+      .expect(201);
+
+    const revokedLink = revokedResponse.body as {
+      id?: unknown;
+      token?: unknown;
+    };
+
+    if (
+      typeof revokedLink.id !== 'string' ||
+      typeof revokedLink.token !== 'string'
+    ) {
+      throw new Error('Revoked public link data is missing');
+    }
+
+    await request(app.getHttpServer())
+      .delete(`/files/${file.id}/public-links/${revokedLink.id}`)
+      .set(authorization(owner.accessToken))
+      .expect(204);
+
+    await request(app.getHttpServer())
+      .get(`/public/files/${revokedLink.token}`)
+      .expect(404);
+
+    await request(app.getHttpServer())
+      .get(`/public/files/${revokedLink.token}/download`)
+      .expect(404);
+  });
+
+  it('browses a public folder tree and prevents access outside it', async () => {
+  const publicRootId = await createFolder(
+    owner.accessToken,
+    'Public Root',
+  );
+
+  const publicChildId = await createFolder(
+    owner.accessToken,
+    'Public Child',
+    publicRootId,
+  );
+
+  const outsideFolderId = await createFolder(
+    owner.accessToken,
+    'Outside Folder',
+  );
+
+  const rootFile = await uploadFile(
+    owner.accessToken,
+    'root-public.txt',
+    Buffer.from('Root public content'),
+    publicRootId,
+  );
+
+  const childFile = await uploadFile(
+    owner.accessToken,
+    'child-public.txt',
+    Buffer.from('Child public content'),
+    publicChildId,
+  );
+
+  const outsideFile = await uploadFile(
+    owner.accessToken,
+    'outside-secret.txt',
+    Buffer.from('Outside secret content'),
+    outsideFolderId,
+  );
+
+  await markFileReady(rootFile.id);
+  await markFileReady(childFile.id);
+  await markFileReady(outsideFile.id);
+
+  const createLinkResponse = await request(
+    app.getHttpServer(),
+  )
+    .post(
+      `/folders/${publicRootId}/public-links`,
+    )
+    .set(authorization(owner.accessToken))
+    .send({})
+    .expect(201);
+
+  const publicLink =
+    createLinkResponse.body as {
+      token?: unknown;
+    };
+
+  if (typeof publicLink.token !== 'string') {
+    throw new Error(
+      'Public folder link token is missing',
+    );
+  }
+
+  const token = publicLink.token;
+
+  // Корень публичного дерева.
+  const rootResponse = await request(
+    app.getHttpServer(),
+  )
+    .get(`/public/folders/${token}`)
+    .expect(200);
+
+  const rootBody = rootResponse.body as {
+    rootFolderId?: unknown;
+    folder?: {
+      id?: unknown;
+      name?: unknown;
+      parentId?: unknown;
+    };
+    folders?: Array<{
+      id?: unknown;
+      name?: unknown;
+      parentId?: unknown;
+    }>;
+    files?: Array<{
+      id?: unknown;
+      name?: unknown;
+      mimeType?: unknown;
+      size?: unknown;
+    }>;
+  };
+
+  expect(rootBody.rootFolderId).toBe(
+    publicRootId,
+  );
+
+  expect(rootBody.folder).toMatchObject({
+    id: publicRootId,
+    name: 'Public Root',
+    parentId: null,
+  });
+
+  expect(rootBody.folders).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        id: publicChildId,
+        name: 'Public Child',
+        parentId: publicRootId,
+      }),
+    ]),
+  );
+
+  expect(rootBody.files).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        id: rootFile.id,
+        name: 'root-public.txt',
+      }),
+    ]),
+  );
+
+  // Переходим во вложенную папку.
+  const childResponse = await request(
+    app.getHttpServer(),
+  )
+    .get(
+      `/public/folders/${token}/folders/${publicChildId}`,
+    )
+    .expect(200);
+
+  const childBody = childResponse.body as {
+    rootFolderId?: unknown;
+    folder?: {
+      id?: unknown;
+      name?: unknown;
+      parentId?: unknown;
+    };
+    files?: Array<{
+      id?: unknown;
+      name?: unknown;
+    }>;
+  };
+
+  expect(childBody.rootFolderId).toBe(
+    publicRootId,
+  );
+
+  expect(childBody.folder).toMatchObject({
+    id: publicChildId,
+    name: 'Public Child',
+    parentId: publicRootId,
+  });
+
+  expect(childBody.files).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        id: childFile.id,
+        name: 'child-public.txt',
+      }),
+    ]),
+  );
+
+  // Файл внутри опубликованного дерева скачивается.
+  const downloadResponse = await request(
+    app.getHttpServer(),
+  )
+    .get(
+      `/public/folders/${token}/files/${childFile.id}/download`,
+    )
+    .expect(200);
+
+  const downloadBody =
+    downloadResponse.body as {
+      url?: unknown;
+      expiresAt?: unknown;
+    };
+
+  expect(downloadBody.url).toBe(
+    'https://storage.test/download',
+  );
+
+  expect(typeof downloadBody.expiresAt).toBe(
+    'string',
+  );
+
+  expect(
+    createPresignedDownloadUrlMock,
+  ).toHaveBeenCalledWith(
+    expect.objectContaining({
+      downloadFileName:
+        'child-public.txt',
+      contentType: 'text/plain',
+      expiresInSeconds: 600,
+    }),
+  );
+
+  // Попытка вручную открыть соседнюю папку.
+  await request(app.getHttpServer())
+    .get(
+      `/public/folders/${token}/folders/${outsideFolderId}`,
+    )
+    .expect(404);
+
+  // Попытка скачать файл из соседней папки.
+  await request(app.getHttpServer())
+    .get(
+      `/public/folders/${token}/files/${outsideFile.id}/download`,
+    )
+    .expect(404);
+});
+
+it('returns 404 for invalid, expired and revoked public folder links', async () => {
+  // Несуществующий токен.
+  await request(app.getHttpServer())
+    .get('/public/folders/invalid-public-folder-token')
+    .expect(404);
+
+  const rootFolderId = await createFolder(
+    owner.accessToken,
+    'Invalid States Public Root',
+  );
+
+  const childFolderId = await createFolder(
+    owner.accessToken,
+    'Invalid States Public Child',
+    rootFolderId,
+  );
+
+  const childFile = await uploadFile(
+    owner.accessToken,
+    'invalid-states-public-file.txt',
+    Buffer.from('Public folder invalid states'),
+    childFolderId,
+  );
+
+  await markFileReady(childFile.id);
+
+  // -------------------------
+  // Expired public link
+  // -------------------------
+
+  const expiringResponse = await request(
+    app.getHttpServer(),
+  )
+    .post(
+      `/folders/${rootFolderId}/public-links`,
+    )
+    .set(authorization(owner.accessToken))
+    .send({
+      expiresAt: new Date(
+        Date.now() + 60 * 60 * 1000,
+      ).toISOString(),
+    })
+    .expect(201);
+
+  const expiringLink =
+    expiringResponse.body as {
+      id?: unknown;
+      token?: unknown;
+    };
+
+  if (
+    typeof expiringLink.id !== 'string' ||
+    typeof expiringLink.token !== 'string'
+  ) {
+    throw new Error(
+      'Expiring folder public link data is missing',
+    );
+  }
+
+  await prisma.folderPublicLink.update({
+    where: {
+      id: expiringLink.id,
+    },
+    data: {
+      expiresAt: new Date(
+        Date.now() - 60_000,
+      ),
+    },
+  });
+
+  await request(app.getHttpServer())
+    .get(
+      `/public/folders/${expiringLink.token}`,
+    )
+    .expect(404);
+
+  // -------------------------
+  // Revoked public link
+  // -------------------------
+
+  const revokedResponse = await request(
+    app.getHttpServer(),
+  )
+    .post(
+      `/folders/${rootFolderId}/public-links`,
+    )
+    .set(authorization(owner.accessToken))
+    .send({})
+    .expect(201);
+
+  const revokedLink =
+    revokedResponse.body as {
+      id?: unknown;
+      token?: unknown;
+    };
+
+  if (
+    typeof revokedLink.id !== 'string' ||
+    typeof revokedLink.token !== 'string'
+  ) {
+    throw new Error(
+      'Revoked folder public link data is missing',
+    );
+  }
+
+  // До revoke ссылка должна работать.
+  await request(app.getHttpServer())
+    .get(
+      `/public/folders/${revokedLink.token}`,
+    )
+    .expect(200);
+
+  await request(app.getHttpServer())
+    .get(
+      `/public/folders/${revokedLink.token}/folders/${childFolderId}`,
+    )
+    .expect(200);
+
+  await request(app.getHttpServer())
+    .delete(
+      `/folders/${rootFolderId}/public-links/${revokedLink.id}`,
+    )
+    .set(authorization(owner.accessToken))
+    .expect(204);
+
+  createPresignedDownloadUrlMock.mockClear();
+
+  // После revoke недоступен корень.
+  await request(app.getHttpServer())
+    .get(
+      `/public/folders/${revokedLink.token}`,
+    )
+    .expect(404);
+
+  // После revoke нельзя зайти во вложенную папку.
+  await request(app.getHttpServer())
+    .get(
+      `/public/folders/${revokedLink.token}/folders/${childFolderId}`,
+    )
+    .expect(404);
+
+  // После revoke нельзя скачать файл из дерева.
+  await request(app.getHttpServer())
+    .get(
+      `/public/folders/${revokedLink.token}/files/${childFile.id}/download`,
+    )
+    .expect(404);
+
+  expect(
+    createPresignedDownloadUrlMock,
+  ).not.toHaveBeenCalled();
+});
 });

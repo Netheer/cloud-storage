@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
@@ -771,6 +771,146 @@ describe('Folders (e2e)', () => {
       .delete(`/folders/${sharedFolder.id}`)
       .set(authorization(viewerToken))
       .expect(403);
+  });
+
+  it('manages folder public link lifecycle for the owner', async () => {
+    const folder = await createFolder(ownerToken, 'Public Link Folder');
+
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+    const createResponse = await request(app.getHttpServer())
+      .post(`/folders/${folder.id}/public-links`)
+      .set(authorization(ownerToken))
+      .send({
+        expiresAt,
+      })
+      .expect(201);
+
+    const createdLink = createResponse.body as {
+      id?: unknown;
+      token?: unknown;
+      expiresAt?: unknown;
+      revokedAt?: unknown;
+      createdAt?: unknown;
+    };
+
+    if (typeof createdLink.id !== 'string') {
+      throw new Error('Created public link ID is missing');
+    }
+
+    if (typeof createdLink.token !== 'string') {
+      throw new Error('Created public link token is missing');
+    }
+
+    expect(createdLink.expiresAt).toBe(expiresAt);
+    expect(createdLink.revokedAt).toBeNull();
+    expect(typeof createdLink.createdAt).toBe('string');
+
+    const storedLink = await prisma.folderPublicLink.findUnique({
+      where: {
+        id: createdLink.id,
+      },
+      select: {
+        tokenHash: true,
+        revokedAt: true,
+      },
+    });
+
+    expect(storedLink).not.toBeNull();
+
+    const expectedTokenHash = createHash('sha256')
+      .update(createdLink.token)
+      .digest('hex');
+
+    expect(storedLink?.tokenHash).toBe(expectedTokenHash);
+
+    expect(storedLink?.tokenHash).not.toBe(createdLink.token);
+
+    const listResponse = await request(app.getHttpServer())
+      .get(`/folders/${folder.id}/public-links`)
+      .set(authorization(ownerToken))
+      .expect(200);
+
+    const listedLinks = listResponse.body as Array<Record<string, unknown>>;
+
+    const listedLink = listedLinks.find((link) => link.id === createdLink.id);
+
+    expect(listedLink).toEqual(
+      expect.objectContaining({
+        id: createdLink.id,
+        revokedAt: null,
+      }),
+    );
+
+    expect(listedLink).not.toHaveProperty('token');
+
+    expect(listedLink).not.toHaveProperty('tokenHash');
+
+    await request(app.getHttpServer())
+      .delete(`/folders/${folder.id}/public-links/${createdLink.id}`)
+      .set(authorization(ownerToken))
+      .expect(204);
+
+    const revokedLink = await prisma.folderPublicLink.findUnique({
+      where: {
+        id: createdLink.id,
+      },
+      select: {
+        revokedAt: true,
+      },
+    });
+
+    expect(revokedLink?.revokedAt).toBeInstanceOf(Date);
+
+    // Повторный revoke должен быть идемпотентным.
+    await request(app.getHttpServer())
+      .delete(`/folders/${folder.id}/public-links/${createdLink.id}`)
+      .set(authorization(ownerToken))
+      .expect(204);
+  });
+
+  it('allows only OWNER to manage folder public links', async () => {
+    const viewerEmail = createTestEmail('folders.public-link.viewer');
+
+    const viewerToken = await registerAndLogin(viewerEmail);
+
+    const folder = await createFolder(ownerToken, 'Owner Public Link Folder');
+
+    await request(app.getHttpServer())
+      .post(`/folders/${folder.id}/shares`)
+      .set(authorization(ownerToken))
+      .send({
+        email: viewerEmail,
+        role: 'VIEWER',
+      })
+      .expect(201);
+
+    // VIEWER видит папку, но public links — OWNER-only.
+    await request(app.getHttpServer())
+      .post(`/folders/${folder.id}/public-links`)
+      .set(authorization(viewerToken))
+      .send({})
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .get(`/folders/${folder.id}/public-links`)
+      .set(authorization(viewerToken))
+      .expect(403);
+
+    // Пользователь без доступа вообще получает 404.
+    await request(app.getHttpServer())
+      .get(`/folders/${folder.id}/public-links`)
+      .set(authorization(otherUserToken))
+      .expect(404);
+
+    // Просроченную ссылку создавать нельзя.
+    await request(app.getHttpServer())
+      .post(`/folders/${folder.id}/public-links`)
+      .set(authorization(ownerToken))
+      .send({
+        expiresAt: new Date(Date.now() - 60_000).toISOString(),
+      })
+      .expect(400);
   });
 
   it('renames and moves folders while preventing cycles', async () => {

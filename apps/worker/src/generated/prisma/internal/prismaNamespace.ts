@@ -407,7 +407,9 @@ export const ModelName = {
   UploadSession: 'UploadSession',
   UploadPart: 'UploadPart',
   AuthSession: 'AuthSession',
-  OutboxEvent: 'OutboxEvent'
+  OutboxEvent: 'OutboxEvent',
+  FolderPublicLink: 'FolderPublicLink',
+  FilePublicLink: 'FilePublicLink'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -423,7 +425,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "user" | "folder" | "file" | "folderAccessGrant" | "fileAccessGrant" | "fileVersion" | "storedObject" | "uploadSession" | "uploadPart" | "authSession" | "outboxEvent"
+    modelProps: "user" | "folder" | "file" | "folderAccessGrant" | "fileAccessGrant" | "fileVersion" | "storedObject" | "uploadSession" | "uploadPart" | "authSession" | "outboxEvent" | "folderPublicLink" | "filePublicLink"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -1241,6 +1243,154 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    FolderPublicLink: {
+      payload: Prisma.$FolderPublicLinkPayload<ExtArgs>
+      fields: Prisma.FolderPublicLinkFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.FolderPublicLinkFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FolderPublicLinkPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.FolderPublicLinkFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FolderPublicLinkPayload>
+        }
+        findFirst: {
+          args: Prisma.FolderPublicLinkFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FolderPublicLinkPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.FolderPublicLinkFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FolderPublicLinkPayload>
+        }
+        findMany: {
+          args: Prisma.FolderPublicLinkFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FolderPublicLinkPayload>[]
+        }
+        create: {
+          args: Prisma.FolderPublicLinkCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FolderPublicLinkPayload>
+        }
+        createMany: {
+          args: Prisma.FolderPublicLinkCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.FolderPublicLinkCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FolderPublicLinkPayload>[]
+        }
+        delete: {
+          args: Prisma.FolderPublicLinkDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FolderPublicLinkPayload>
+        }
+        update: {
+          args: Prisma.FolderPublicLinkUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FolderPublicLinkPayload>
+        }
+        deleteMany: {
+          args: Prisma.FolderPublicLinkDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.FolderPublicLinkUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.FolderPublicLinkUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FolderPublicLinkPayload>[]
+        }
+        upsert: {
+          args: Prisma.FolderPublicLinkUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FolderPublicLinkPayload>
+        }
+        aggregate: {
+          args: Prisma.FolderPublicLinkAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateFolderPublicLink>
+        }
+        groupBy: {
+          args: Prisma.FolderPublicLinkGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.FolderPublicLinkGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.FolderPublicLinkCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.FolderPublicLinkCountAggregateOutputType> | number
+        }
+      }
+    }
+    FilePublicLink: {
+      payload: Prisma.$FilePublicLinkPayload<ExtArgs>
+      fields: Prisma.FilePublicLinkFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.FilePublicLinkFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FilePublicLinkPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.FilePublicLinkFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FilePublicLinkPayload>
+        }
+        findFirst: {
+          args: Prisma.FilePublicLinkFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FilePublicLinkPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.FilePublicLinkFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FilePublicLinkPayload>
+        }
+        findMany: {
+          args: Prisma.FilePublicLinkFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FilePublicLinkPayload>[]
+        }
+        create: {
+          args: Prisma.FilePublicLinkCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FilePublicLinkPayload>
+        }
+        createMany: {
+          args: Prisma.FilePublicLinkCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.FilePublicLinkCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FilePublicLinkPayload>[]
+        }
+        delete: {
+          args: Prisma.FilePublicLinkDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FilePublicLinkPayload>
+        }
+        update: {
+          args: Prisma.FilePublicLinkUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FilePublicLinkPayload>
+        }
+        deleteMany: {
+          args: Prisma.FilePublicLinkDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.FilePublicLinkUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.FilePublicLinkUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FilePublicLinkPayload>[]
+        }
+        upsert: {
+          args: Prisma.FilePublicLinkUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FilePublicLinkPayload>
+        }
+        aggregate: {
+          args: Prisma.FilePublicLinkAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateFilePublicLink>
+        }
+        groupBy: {
+          args: Prisma.FilePublicLinkGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.FilePublicLinkGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.FilePublicLinkCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.FilePublicLinkCountAggregateOutputType> | number
+        }
+      }
+    }
   }
 } & {
   other: {
@@ -1435,6 +1585,32 @@ export const OutboxEventScalarFieldEnum = {
 } as const
 
 export type OutboxEventScalarFieldEnum = (typeof OutboxEventScalarFieldEnum)[keyof typeof OutboxEventScalarFieldEnum]
+
+
+export const FolderPublicLinkScalarFieldEnum = {
+  id: 'id',
+  folderId: 'folderId',
+  tokenHash: 'tokenHash',
+  expiresAt: 'expiresAt',
+  revokedAt: 'revokedAt',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type FolderPublicLinkScalarFieldEnum = (typeof FolderPublicLinkScalarFieldEnum)[keyof typeof FolderPublicLinkScalarFieldEnum]
+
+
+export const FilePublicLinkScalarFieldEnum = {
+  id: 'id',
+  fileId: 'fileId',
+  tokenHash: 'tokenHash',
+  expiresAt: 'expiresAt',
+  revokedAt: 'revokedAt',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type FilePublicLinkScalarFieldEnum = (typeof FilePublicLinkScalarFieldEnum)[keyof typeof FilePublicLinkScalarFieldEnum]
 
 
 export const SortOrder = {
@@ -1770,6 +1946,8 @@ export type GlobalOmitConfig = {
   uploadPart?: Prisma.UploadPartOmit
   authSession?: Prisma.AuthSessionOmit
   outboxEvent?: Prisma.OutboxEventOmit
+  folderPublicLink?: Prisma.FolderPublicLinkOmit
+  filePublicLink?: Prisma.FilePublicLinkOmit
 }
 
 /* Types for Logging */

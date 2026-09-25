@@ -220,6 +220,7 @@ export type FileWhereInput = {
   currentVersion?: Prisma.XOR<Prisma.FileVersionNullableScalarRelationFilter, Prisma.FileVersionWhereInput> | null
   uploads?: Prisma.UploadSessionListRelationFilter
   accessGrants?: Prisma.FileAccessGrantListRelationFilter
+  publicLinks?: Prisma.FilePublicLinkListRelationFilter
 }
 
 export type FileOrderByWithRelationInput = {
@@ -238,6 +239,7 @@ export type FileOrderByWithRelationInput = {
   currentVersion?: Prisma.FileVersionOrderByWithRelationInput
   uploads?: Prisma.UploadSessionOrderByRelationAggregateInput
   accessGrants?: Prisma.FileAccessGrantOrderByRelationAggregateInput
+  publicLinks?: Prisma.FilePublicLinkOrderByRelationAggregateInput
 }
 
 export type FileWhereUniqueInput = Prisma.AtLeast<{
@@ -259,6 +261,7 @@ export type FileWhereUniqueInput = Prisma.AtLeast<{
   currentVersion?: Prisma.XOR<Prisma.FileVersionNullableScalarRelationFilter, Prisma.FileVersionWhereInput> | null
   uploads?: Prisma.UploadSessionListRelationFilter
   accessGrants?: Prisma.FileAccessGrantListRelationFilter
+  publicLinks?: Prisma.FilePublicLinkListRelationFilter
 }, "id" | "currentVersionId">
 
 export type FileOrderByWithAggregationInput = {
@@ -304,6 +307,7 @@ export type FileCreateInput = {
   currentVersion?: Prisma.FileVersionCreateNestedOneWithoutCurrentForInput
   uploads?: Prisma.UploadSessionCreateNestedManyWithoutFileInput
   accessGrants?: Prisma.FileAccessGrantCreateNestedManyWithoutFileInput
+  publicLinks?: Prisma.FilePublicLinkCreateNestedManyWithoutFileInput
 }
 
 export type FileUncheckedCreateInput = {
@@ -319,6 +323,7 @@ export type FileUncheckedCreateInput = {
   versions?: Prisma.FileVersionUncheckedCreateNestedManyWithoutFileInput
   uploads?: Prisma.UploadSessionUncheckedCreateNestedManyWithoutFileInput
   accessGrants?: Prisma.FileAccessGrantUncheckedCreateNestedManyWithoutFileInput
+  publicLinks?: Prisma.FilePublicLinkUncheckedCreateNestedManyWithoutFileInput
 }
 
 export type FileUpdateInput = {
@@ -334,6 +339,7 @@ export type FileUpdateInput = {
   currentVersion?: Prisma.FileVersionUpdateOneWithoutCurrentForNestedInput
   uploads?: Prisma.UploadSessionUpdateManyWithoutFileNestedInput
   accessGrants?: Prisma.FileAccessGrantUpdateManyWithoutFileNestedInput
+  publicLinks?: Prisma.FilePublicLinkUpdateManyWithoutFileNestedInput
 }
 
 export type FileUncheckedUpdateInput = {
@@ -349,6 +355,7 @@ export type FileUncheckedUpdateInput = {
   versions?: Prisma.FileVersionUncheckedUpdateManyWithoutFileNestedInput
   uploads?: Prisma.UploadSessionUncheckedUpdateManyWithoutFileNestedInput
   accessGrants?: Prisma.FileAccessGrantUncheckedUpdateManyWithoutFileNestedInput
+  publicLinks?: Prisma.FilePublicLinkUncheckedUpdateManyWithoutFileNestedInput
 }
 
 export type FileCreateManyInput = {
@@ -608,6 +615,20 @@ export type FileUpdateOneWithoutUploadsNestedInput = {
   update?: Prisma.XOR<Prisma.XOR<Prisma.FileUpdateToOneWithWhereWithoutUploadsInput, Prisma.FileUpdateWithoutUploadsInput>, Prisma.FileUncheckedUpdateWithoutUploadsInput>
 }
 
+export type FileCreateNestedOneWithoutPublicLinksInput = {
+  create?: Prisma.XOR<Prisma.FileCreateWithoutPublicLinksInput, Prisma.FileUncheckedCreateWithoutPublicLinksInput>
+  connectOrCreate?: Prisma.FileCreateOrConnectWithoutPublicLinksInput
+  connect?: Prisma.FileWhereUniqueInput
+}
+
+export type FileUpdateOneRequiredWithoutPublicLinksNestedInput = {
+  create?: Prisma.XOR<Prisma.FileCreateWithoutPublicLinksInput, Prisma.FileUncheckedCreateWithoutPublicLinksInput>
+  connectOrCreate?: Prisma.FileCreateOrConnectWithoutPublicLinksInput
+  upsert?: Prisma.FileUpsertWithoutPublicLinksInput
+  connect?: Prisma.FileWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.FileUpdateToOneWithWhereWithoutPublicLinksInput, Prisma.FileUpdateWithoutPublicLinksInput>, Prisma.FileUncheckedUpdateWithoutPublicLinksInput>
+}
+
 export type FileCreateWithoutOwnerInput = {
   id?: string
   name: string
@@ -620,6 +641,7 @@ export type FileCreateWithoutOwnerInput = {
   currentVersion?: Prisma.FileVersionCreateNestedOneWithoutCurrentForInput
   uploads?: Prisma.UploadSessionCreateNestedManyWithoutFileInput
   accessGrants?: Prisma.FileAccessGrantCreateNestedManyWithoutFileInput
+  publicLinks?: Prisma.FilePublicLinkCreateNestedManyWithoutFileInput
 }
 
 export type FileUncheckedCreateWithoutOwnerInput = {
@@ -634,6 +656,7 @@ export type FileUncheckedCreateWithoutOwnerInput = {
   versions?: Prisma.FileVersionUncheckedCreateNestedManyWithoutFileInput
   uploads?: Prisma.UploadSessionUncheckedCreateNestedManyWithoutFileInput
   accessGrants?: Prisma.FileAccessGrantUncheckedCreateNestedManyWithoutFileInput
+  publicLinks?: Prisma.FilePublicLinkUncheckedCreateNestedManyWithoutFileInput
 }
 
 export type FileCreateOrConnectWithoutOwnerInput = {
@@ -689,6 +712,7 @@ export type FileCreateWithoutFolderInput = {
   currentVersion?: Prisma.FileVersionCreateNestedOneWithoutCurrentForInput
   uploads?: Prisma.UploadSessionCreateNestedManyWithoutFileInput
   accessGrants?: Prisma.FileAccessGrantCreateNestedManyWithoutFileInput
+  publicLinks?: Prisma.FilePublicLinkCreateNestedManyWithoutFileInput
 }
 
 export type FileUncheckedCreateWithoutFolderInput = {
@@ -703,6 +727,7 @@ export type FileUncheckedCreateWithoutFolderInput = {
   versions?: Prisma.FileVersionUncheckedCreateNestedManyWithoutFileInput
   uploads?: Prisma.UploadSessionUncheckedCreateNestedManyWithoutFileInput
   accessGrants?: Prisma.FileAccessGrantUncheckedCreateNestedManyWithoutFileInput
+  publicLinks?: Prisma.FilePublicLinkUncheckedCreateNestedManyWithoutFileInput
 }
 
 export type FileCreateOrConnectWithoutFolderInput = {
@@ -743,6 +768,7 @@ export type FileCreateWithoutAccessGrantsInput = {
   versions?: Prisma.FileVersionCreateNestedManyWithoutFileInput
   currentVersion?: Prisma.FileVersionCreateNestedOneWithoutCurrentForInput
   uploads?: Prisma.UploadSessionCreateNestedManyWithoutFileInput
+  publicLinks?: Prisma.FilePublicLinkCreateNestedManyWithoutFileInput
 }
 
 export type FileUncheckedCreateWithoutAccessGrantsInput = {
@@ -757,6 +783,7 @@ export type FileUncheckedCreateWithoutAccessGrantsInput = {
   deletedAt?: Date | string | null
   versions?: Prisma.FileVersionUncheckedCreateNestedManyWithoutFileInput
   uploads?: Prisma.UploadSessionUncheckedCreateNestedManyWithoutFileInput
+  publicLinks?: Prisma.FilePublicLinkUncheckedCreateNestedManyWithoutFileInput
 }
 
 export type FileCreateOrConnectWithoutAccessGrantsInput = {
@@ -787,6 +814,7 @@ export type FileUpdateWithoutAccessGrantsInput = {
   versions?: Prisma.FileVersionUpdateManyWithoutFileNestedInput
   currentVersion?: Prisma.FileVersionUpdateOneWithoutCurrentForNestedInput
   uploads?: Prisma.UploadSessionUpdateManyWithoutFileNestedInput
+  publicLinks?: Prisma.FilePublicLinkUpdateManyWithoutFileNestedInput
 }
 
 export type FileUncheckedUpdateWithoutAccessGrantsInput = {
@@ -801,6 +829,7 @@ export type FileUncheckedUpdateWithoutAccessGrantsInput = {
   deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   versions?: Prisma.FileVersionUncheckedUpdateManyWithoutFileNestedInput
   uploads?: Prisma.UploadSessionUncheckedUpdateManyWithoutFileNestedInput
+  publicLinks?: Prisma.FilePublicLinkUncheckedUpdateManyWithoutFileNestedInput
 }
 
 export type FileCreateWithoutVersionsInput = {
@@ -815,6 +844,7 @@ export type FileCreateWithoutVersionsInput = {
   currentVersion?: Prisma.FileVersionCreateNestedOneWithoutCurrentForInput
   uploads?: Prisma.UploadSessionCreateNestedManyWithoutFileInput
   accessGrants?: Prisma.FileAccessGrantCreateNestedManyWithoutFileInput
+  publicLinks?: Prisma.FilePublicLinkCreateNestedManyWithoutFileInput
 }
 
 export type FileUncheckedCreateWithoutVersionsInput = {
@@ -829,6 +859,7 @@ export type FileUncheckedCreateWithoutVersionsInput = {
   deletedAt?: Date | string | null
   uploads?: Prisma.UploadSessionUncheckedCreateNestedManyWithoutFileInput
   accessGrants?: Prisma.FileAccessGrantUncheckedCreateNestedManyWithoutFileInput
+  publicLinks?: Prisma.FilePublicLinkUncheckedCreateNestedManyWithoutFileInput
 }
 
 export type FileCreateOrConnectWithoutVersionsInput = {
@@ -848,6 +879,7 @@ export type FileCreateWithoutCurrentVersionInput = {
   versions?: Prisma.FileVersionCreateNestedManyWithoutFileInput
   uploads?: Prisma.UploadSessionCreateNestedManyWithoutFileInput
   accessGrants?: Prisma.FileAccessGrantCreateNestedManyWithoutFileInput
+  publicLinks?: Prisma.FilePublicLinkCreateNestedManyWithoutFileInput
 }
 
 export type FileUncheckedCreateWithoutCurrentVersionInput = {
@@ -862,6 +894,7 @@ export type FileUncheckedCreateWithoutCurrentVersionInput = {
   versions?: Prisma.FileVersionUncheckedCreateNestedManyWithoutFileInput
   uploads?: Prisma.UploadSessionUncheckedCreateNestedManyWithoutFileInput
   accessGrants?: Prisma.FileAccessGrantUncheckedCreateNestedManyWithoutFileInput
+  publicLinks?: Prisma.FilePublicLinkUncheckedCreateNestedManyWithoutFileInput
 }
 
 export type FileCreateOrConnectWithoutCurrentVersionInput = {
@@ -892,6 +925,7 @@ export type FileUpdateWithoutVersionsInput = {
   currentVersion?: Prisma.FileVersionUpdateOneWithoutCurrentForNestedInput
   uploads?: Prisma.UploadSessionUpdateManyWithoutFileNestedInput
   accessGrants?: Prisma.FileAccessGrantUpdateManyWithoutFileNestedInput
+  publicLinks?: Prisma.FilePublicLinkUpdateManyWithoutFileNestedInput
 }
 
 export type FileUncheckedUpdateWithoutVersionsInput = {
@@ -906,6 +940,7 @@ export type FileUncheckedUpdateWithoutVersionsInput = {
   deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   uploads?: Prisma.UploadSessionUncheckedUpdateManyWithoutFileNestedInput
   accessGrants?: Prisma.FileAccessGrantUncheckedUpdateManyWithoutFileNestedInput
+  publicLinks?: Prisma.FilePublicLinkUncheckedUpdateManyWithoutFileNestedInput
 }
 
 export type FileUpsertWithoutCurrentVersionInput = {
@@ -931,6 +966,7 @@ export type FileUpdateWithoutCurrentVersionInput = {
   versions?: Prisma.FileVersionUpdateManyWithoutFileNestedInput
   uploads?: Prisma.UploadSessionUpdateManyWithoutFileNestedInput
   accessGrants?: Prisma.FileAccessGrantUpdateManyWithoutFileNestedInput
+  publicLinks?: Prisma.FilePublicLinkUpdateManyWithoutFileNestedInput
 }
 
 export type FileUncheckedUpdateWithoutCurrentVersionInput = {
@@ -945,6 +981,7 @@ export type FileUncheckedUpdateWithoutCurrentVersionInput = {
   versions?: Prisma.FileVersionUncheckedUpdateManyWithoutFileNestedInput
   uploads?: Prisma.UploadSessionUncheckedUpdateManyWithoutFileNestedInput
   accessGrants?: Prisma.FileAccessGrantUncheckedUpdateManyWithoutFileNestedInput
+  publicLinks?: Prisma.FilePublicLinkUncheckedUpdateManyWithoutFileNestedInput
 }
 
 export type FileCreateWithoutUploadsInput = {
@@ -959,6 +996,7 @@ export type FileCreateWithoutUploadsInput = {
   versions?: Prisma.FileVersionCreateNestedManyWithoutFileInput
   currentVersion?: Prisma.FileVersionCreateNestedOneWithoutCurrentForInput
   accessGrants?: Prisma.FileAccessGrantCreateNestedManyWithoutFileInput
+  publicLinks?: Prisma.FilePublicLinkCreateNestedManyWithoutFileInput
 }
 
 export type FileUncheckedCreateWithoutUploadsInput = {
@@ -973,6 +1011,7 @@ export type FileUncheckedCreateWithoutUploadsInput = {
   deletedAt?: Date | string | null
   versions?: Prisma.FileVersionUncheckedCreateNestedManyWithoutFileInput
   accessGrants?: Prisma.FileAccessGrantUncheckedCreateNestedManyWithoutFileInput
+  publicLinks?: Prisma.FilePublicLinkUncheckedCreateNestedManyWithoutFileInput
 }
 
 export type FileCreateOrConnectWithoutUploadsInput = {
@@ -1003,6 +1042,7 @@ export type FileUpdateWithoutUploadsInput = {
   versions?: Prisma.FileVersionUpdateManyWithoutFileNestedInput
   currentVersion?: Prisma.FileVersionUpdateOneWithoutCurrentForNestedInput
   accessGrants?: Prisma.FileAccessGrantUpdateManyWithoutFileNestedInput
+  publicLinks?: Prisma.FilePublicLinkUpdateManyWithoutFileNestedInput
 }
 
 export type FileUncheckedUpdateWithoutUploadsInput = {
@@ -1016,6 +1056,83 @@ export type FileUncheckedUpdateWithoutUploadsInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   versions?: Prisma.FileVersionUncheckedUpdateManyWithoutFileNestedInput
+  accessGrants?: Prisma.FileAccessGrantUncheckedUpdateManyWithoutFileNestedInput
+  publicLinks?: Prisma.FilePublicLinkUncheckedUpdateManyWithoutFileNestedInput
+}
+
+export type FileCreateWithoutPublicLinksInput = {
+  id?: string
+  name: string
+  status?: $Enums.FileStatus
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  deletedAt?: Date | string | null
+  owner: Prisma.UserCreateNestedOneWithoutFilesInput
+  folder?: Prisma.FolderCreateNestedOneWithoutFilesInput
+  versions?: Prisma.FileVersionCreateNestedManyWithoutFileInput
+  currentVersion?: Prisma.FileVersionCreateNestedOneWithoutCurrentForInput
+  uploads?: Prisma.UploadSessionCreateNestedManyWithoutFileInput
+  accessGrants?: Prisma.FileAccessGrantCreateNestedManyWithoutFileInput
+}
+
+export type FileUncheckedCreateWithoutPublicLinksInput = {
+  id?: string
+  name: string
+  ownerId: string
+  folderId?: string | null
+  currentVersionId?: string | null
+  status?: $Enums.FileStatus
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  deletedAt?: Date | string | null
+  versions?: Prisma.FileVersionUncheckedCreateNestedManyWithoutFileInput
+  uploads?: Prisma.UploadSessionUncheckedCreateNestedManyWithoutFileInput
+  accessGrants?: Prisma.FileAccessGrantUncheckedCreateNestedManyWithoutFileInput
+}
+
+export type FileCreateOrConnectWithoutPublicLinksInput = {
+  where: Prisma.FileWhereUniqueInput
+  create: Prisma.XOR<Prisma.FileCreateWithoutPublicLinksInput, Prisma.FileUncheckedCreateWithoutPublicLinksInput>
+}
+
+export type FileUpsertWithoutPublicLinksInput = {
+  update: Prisma.XOR<Prisma.FileUpdateWithoutPublicLinksInput, Prisma.FileUncheckedUpdateWithoutPublicLinksInput>
+  create: Prisma.XOR<Prisma.FileCreateWithoutPublicLinksInput, Prisma.FileUncheckedCreateWithoutPublicLinksInput>
+  where?: Prisma.FileWhereInput
+}
+
+export type FileUpdateToOneWithWhereWithoutPublicLinksInput = {
+  where?: Prisma.FileWhereInput
+  data: Prisma.XOR<Prisma.FileUpdateWithoutPublicLinksInput, Prisma.FileUncheckedUpdateWithoutPublicLinksInput>
+}
+
+export type FileUpdateWithoutPublicLinksInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  status?: Prisma.EnumFileStatusFieldUpdateOperationsInput | $Enums.FileStatus
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  owner?: Prisma.UserUpdateOneRequiredWithoutFilesNestedInput
+  folder?: Prisma.FolderUpdateOneWithoutFilesNestedInput
+  versions?: Prisma.FileVersionUpdateManyWithoutFileNestedInput
+  currentVersion?: Prisma.FileVersionUpdateOneWithoutCurrentForNestedInput
+  uploads?: Prisma.UploadSessionUpdateManyWithoutFileNestedInput
+  accessGrants?: Prisma.FileAccessGrantUpdateManyWithoutFileNestedInput
+}
+
+export type FileUncheckedUpdateWithoutPublicLinksInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  ownerId?: Prisma.StringFieldUpdateOperationsInput | string
+  folderId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  currentVersionId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  status?: Prisma.EnumFileStatusFieldUpdateOperationsInput | $Enums.FileStatus
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  versions?: Prisma.FileVersionUncheckedUpdateManyWithoutFileNestedInput
+  uploads?: Prisma.UploadSessionUncheckedUpdateManyWithoutFileNestedInput
   accessGrants?: Prisma.FileAccessGrantUncheckedUpdateManyWithoutFileNestedInput
 }
 
@@ -1042,6 +1159,7 @@ export type FileUpdateWithoutOwnerInput = {
   currentVersion?: Prisma.FileVersionUpdateOneWithoutCurrentForNestedInput
   uploads?: Prisma.UploadSessionUpdateManyWithoutFileNestedInput
   accessGrants?: Prisma.FileAccessGrantUpdateManyWithoutFileNestedInput
+  publicLinks?: Prisma.FilePublicLinkUpdateManyWithoutFileNestedInput
 }
 
 export type FileUncheckedUpdateWithoutOwnerInput = {
@@ -1056,6 +1174,7 @@ export type FileUncheckedUpdateWithoutOwnerInput = {
   versions?: Prisma.FileVersionUncheckedUpdateManyWithoutFileNestedInput
   uploads?: Prisma.UploadSessionUncheckedUpdateManyWithoutFileNestedInput
   accessGrants?: Prisma.FileAccessGrantUncheckedUpdateManyWithoutFileNestedInput
+  publicLinks?: Prisma.FilePublicLinkUncheckedUpdateManyWithoutFileNestedInput
 }
 
 export type FileUncheckedUpdateManyWithoutOwnerInput = {
@@ -1092,6 +1211,7 @@ export type FileUpdateWithoutFolderInput = {
   currentVersion?: Prisma.FileVersionUpdateOneWithoutCurrentForNestedInput
   uploads?: Prisma.UploadSessionUpdateManyWithoutFileNestedInput
   accessGrants?: Prisma.FileAccessGrantUpdateManyWithoutFileNestedInput
+  publicLinks?: Prisma.FilePublicLinkUpdateManyWithoutFileNestedInput
 }
 
 export type FileUncheckedUpdateWithoutFolderInput = {
@@ -1106,6 +1226,7 @@ export type FileUncheckedUpdateWithoutFolderInput = {
   versions?: Prisma.FileVersionUncheckedUpdateManyWithoutFileNestedInput
   uploads?: Prisma.UploadSessionUncheckedUpdateManyWithoutFileNestedInput
   accessGrants?: Prisma.FileAccessGrantUncheckedUpdateManyWithoutFileNestedInput
+  publicLinks?: Prisma.FilePublicLinkUncheckedUpdateManyWithoutFileNestedInput
 }
 
 export type FileUncheckedUpdateManyWithoutFolderInput = {
@@ -1128,12 +1249,14 @@ export type FileCountOutputType = {
   versions: number
   uploads: number
   accessGrants: number
+  publicLinks: number
 }
 
 export type FileCountOutputTypeSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   versions?: boolean | FileCountOutputTypeCountVersionsArgs
   uploads?: boolean | FileCountOutputTypeCountUploadsArgs
   accessGrants?: boolean | FileCountOutputTypeCountAccessGrantsArgs
+  publicLinks?: boolean | FileCountOutputTypeCountPublicLinksArgs
 }
 
 /**
@@ -1167,6 +1290,13 @@ export type FileCountOutputTypeCountAccessGrantsArgs<ExtArgs extends runtime.Typ
   where?: Prisma.FileAccessGrantWhereInput
 }
 
+/**
+ * FileCountOutputType without action
+ */
+export type FileCountOutputTypeCountPublicLinksArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.FilePublicLinkWhereInput
+}
+
 
 export type FileSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
@@ -1184,6 +1314,7 @@ export type FileSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = r
   currentVersion?: boolean | Prisma.File$currentVersionArgs<ExtArgs>
   uploads?: boolean | Prisma.File$uploadsArgs<ExtArgs>
   accessGrants?: boolean | Prisma.File$accessGrantsArgs<ExtArgs>
+  publicLinks?: boolean | Prisma.File$publicLinksArgs<ExtArgs>
   _count?: boolean | Prisma.FileCountOutputTypeDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["file"]>
 
@@ -1237,6 +1368,7 @@ export type FileInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = 
   currentVersion?: boolean | Prisma.File$currentVersionArgs<ExtArgs>
   uploads?: boolean | Prisma.File$uploadsArgs<ExtArgs>
   accessGrants?: boolean | Prisma.File$accessGrantsArgs<ExtArgs>
+  publicLinks?: boolean | Prisma.File$publicLinksArgs<ExtArgs>
   _count?: boolean | Prisma.FileCountOutputTypeDefaultArgs<ExtArgs>
 }
 export type FileIncludeCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
@@ -1259,6 +1391,7 @@ export type $FilePayload<ExtArgs extends runtime.Types.Extensions.InternalArgs =
     currentVersion: Prisma.$FileVersionPayload<ExtArgs> | null
     uploads: Prisma.$UploadSessionPayload<ExtArgs>[]
     accessGrants: Prisma.$FileAccessGrantPayload<ExtArgs>[]
+    publicLinks: Prisma.$FilePublicLinkPayload<ExtArgs>[]
   }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
@@ -1670,6 +1803,7 @@ export interface Prisma__FileClient<T, Null = never, ExtArgs extends runtime.Typ
   currentVersion<T extends Prisma.File$currentVersionArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.File$currentVersionArgs<ExtArgs>>): Prisma.Prisma__FileVersionClient<runtime.Types.Result.GetResult<Prisma.$FileVersionPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
   uploads<T extends Prisma.File$uploadsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.File$uploadsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$UploadSessionPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   accessGrants<T extends Prisma.File$accessGrantsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.File$accessGrantsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$FileAccessGrantPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  publicLinks<T extends Prisma.File$publicLinksArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.File$publicLinksArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$FilePublicLinkPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   /**
    * Attaches callbacks for the resolution and/or rejection of the Promise.
    * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -2216,6 +2350,30 @@ export type File$accessGrantsArgs<ExtArgs extends runtime.Types.Extensions.Inter
   take?: number
   skip?: number
   distinct?: Prisma.FileAccessGrantScalarFieldEnum | Prisma.FileAccessGrantScalarFieldEnum[]
+}
+
+/**
+ * File.publicLinks
+ */
+export type File$publicLinksArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the FilePublicLink
+   */
+  select?: Prisma.FilePublicLinkSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the FilePublicLink
+   */
+  omit?: Prisma.FilePublicLinkOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.FilePublicLinkInclude<ExtArgs> | null
+  where?: Prisma.FilePublicLinkWhereInput
+  orderBy?: Prisma.FilePublicLinkOrderByWithRelationInput | Prisma.FilePublicLinkOrderByWithRelationInput[]
+  cursor?: Prisma.FilePublicLinkWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.FilePublicLinkScalarFieldEnum | Prisma.FilePublicLinkScalarFieldEnum[]
 }
 
 /**

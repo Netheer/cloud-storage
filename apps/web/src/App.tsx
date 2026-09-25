@@ -10,6 +10,8 @@ import { RegisterPage } from './pages/RegisterPage';
 import { ProtectedRoute } from './routing/ProtectedRoute';
 import { PublicOnlyRoute } from './routing/PublicOnlyRoute';
 import { SharedPage } from './pages/SharedPage';
+import { PublicFilePage } from './pages/PublicFilePage';
+import { PublicFolderPage } from './pages/PublicFolderPage';
 
 function App() {
   return (
@@ -19,6 +21,20 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
         </Route>
+
+        <Route
+  path="/public/files/:token"
+  element={<PublicFilePage />}
+/>
+        <Route
+  path="/public/folders/:token"
+  element={<PublicFolderPage />}
+/>
+
+<Route
+  path="/public/folders/:token/folders/:folderId"
+  element={<PublicFolderPage />}
+/>
 
         <Route element={<ProtectedRoute />}>
   <Route path="/" element={<DashboardPage />} />

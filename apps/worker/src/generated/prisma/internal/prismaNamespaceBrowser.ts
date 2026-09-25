@@ -61,7 +61,9 @@ export const ModelName = {
   UploadSession: 'UploadSession',
   UploadPart: 'UploadPart',
   AuthSession: 'AuthSession',
-  OutboxEvent: 'OutboxEvent'
+  OutboxEvent: 'OutboxEvent',
+  FolderPublicLink: 'FolderPublicLink',
+  FilePublicLink: 'FilePublicLink'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -235,6 +237,32 @@ export const OutboxEventScalarFieldEnum = {
 } as const
 
 export type OutboxEventScalarFieldEnum = (typeof OutboxEventScalarFieldEnum)[keyof typeof OutboxEventScalarFieldEnum]
+
+
+export const FolderPublicLinkScalarFieldEnum = {
+  id: 'id',
+  folderId: 'folderId',
+  tokenHash: 'tokenHash',
+  expiresAt: 'expiresAt',
+  revokedAt: 'revokedAt',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type FolderPublicLinkScalarFieldEnum = (typeof FolderPublicLinkScalarFieldEnum)[keyof typeof FolderPublicLinkScalarFieldEnum]
+
+
+export const FilePublicLinkScalarFieldEnum = {
+  id: 'id',
+  fileId: 'fileId',
+  tokenHash: 'tokenHash',
+  expiresAt: 'expiresAt',
+  revokedAt: 'revokedAt',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type FilePublicLinkScalarFieldEnum = (typeof FilePublicLinkScalarFieldEnum)[keyof typeof FilePublicLinkScalarFieldEnum]
 
 
 export const SortOrder = {
