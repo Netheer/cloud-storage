@@ -172,12 +172,20 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
     }
 
     if (version.storedObjectId !== job.data.storedObjectId) {
-      throw new PermanentFileProcessingError(
-        `Job storedObjectId does not match version ${version.id}`,
+      if (!version.storedObject.sha256) {
+        throw new PermanentFileProcessingError(
+          `Job storedObjectId does not match version ${version.id}`,
+        );
+      }
+
+      this.logger.log(
+        `Version ${version.id} already references ` +
+          `processed stored object ${version.storedObjectId}; ` +
+          `continuing idempotently`,
       );
     }
 
-    const storedObject = version.storedObject;
+    let storedObject = version.storedObject;
 
     if (storedObject.sha256) {
       this.logger.log(
@@ -205,42 +213,13 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
         );
       }
 
-      const updateResult = await this.prisma.storedObject.updateMany({
-        where: {
-          id: storedObject.id,
-          sha256: null,
-        },
-        data: {
-          sha256: calculated.sha256,
-        },
+      storedObject = await this.resolveStoredObjectDeduplication({
+        versionId: version.id,
+        storedObjectId: storedObject.id,
+        objectKey: storedObject.objectKey,
+        size: calculated.size,
+        sha256: calculated.sha256,
       });
-
-      if (updateResult.count === 0) {
-        const currentObject = await this.prisma.storedObject.findUnique({
-          where: {
-            id: storedObject.id,
-          },
-          select: {
-            sha256: true,
-          },
-        });
-
-        if (currentObject?.sha256 !== calculated.sha256) {
-          throw new PermanentFileProcessingError(
-            `Stored object ${storedObject.id} SHA-256 changed concurrently`,
-          );
-        }
-
-        this.logger.log(
-          `SHA-256 for stored object ${storedObject.id} ` +
-            `was already stored by another worker`,
-        );
-      } else {
-        this.logger.log(
-          `Calculated SHA-256 for stored object ${storedObject.id}: ` +
-            `${calculated.sha256}`,
-        );
-      }
     }
 
     await this.processImageMetadata({
@@ -263,6 +242,284 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
     });
 
     await this.markFileReady(job.data.fileId, job.data.versionId);
+  }
+
+  private async resolveStoredObjectDeduplication(input: {
+    versionId: string;
+    storedObjectId: string;
+    objectKey: string;
+    size: bigint;
+    sha256: string;
+  }): Promise<{
+    id: string;
+    objectKey: string;
+    size: bigint;
+    sha256: string | null;
+  }> {
+    const existingObject = await this.prisma.storedObject.findFirst({
+      where: {
+        sha256: input.sha256,
+        size: input.size,
+        id: {
+          not: input.storedObjectId,
+        },
+      },
+      select: {
+        id: true,
+        objectKey: true,
+        size: true,
+        sha256: true,
+      },
+    });
+
+    if (existingObject) {
+      this.logger.log(
+        `Dedup hit for stored object ` +
+          `${input.storedObjectId}: ` +
+          `reusing ${existingObject.id}`,
+      );
+
+      return this.relinkVersionToStoredObject({
+        versionId: input.versionId,
+        duplicateStoredObjectId: input.storedObjectId,
+        duplicateObjectKey: input.objectKey,
+        canonicalStoredObject: existingObject,
+      });
+    }
+
+    try {
+      const updateResult = await this.prisma.storedObject.updateMany({
+        where: {
+          id: input.storedObjectId,
+          sha256: null,
+        },
+        data: {
+          sha256: input.sha256,
+        },
+      });
+
+      if (updateResult.count > 0) {
+        this.logger.log(
+          `Dedup miss for stored object ` +
+            `${input.storedObjectId}: ` +
+            `stored SHA-256 ${input.sha256}`,
+        );
+
+        return {
+          id: input.storedObjectId,
+          objectKey: input.objectKey,
+          size: input.size,
+          sha256: input.sha256,
+        };
+      }
+
+      const currentObject = await this.prisma.storedObject.findUnique({
+        where: {
+          id: input.storedObjectId,
+        },
+        select: {
+          id: true,
+          objectKey: true,
+          size: true,
+          sha256: true,
+        },
+      });
+
+      if (
+        currentObject?.sha256 === input.sha256 &&
+        currentObject.size === input.size
+      ) {
+        this.logger.log(
+          `Stored object ${input.storedObjectId} ` + `was already processed`,
+        );
+
+        return currentObject;
+      }
+
+      throw new PermanentFileProcessingError(
+        `Stored object ${input.storedObjectId} ` + `could not be finalized`,
+      );
+    } catch (error: unknown) {
+      if (!this.isPrismaUniqueConstraintError(error)) {
+        throw error;
+      }
+
+      /*
+       * Другой worker успел первым записать
+       * тот же sha256 + size.
+       */
+      const canonicalObject = await this.prisma.storedObject.findFirst({
+        where: {
+          sha256: input.sha256,
+          size: input.size,
+          id: {
+            not: input.storedObjectId,
+          },
+        },
+        select: {
+          id: true,
+          objectKey: true,
+          size: true,
+          sha256: true,
+        },
+      });
+
+      if (!canonicalObject) {
+        throw error;
+      }
+
+      this.logger.log(
+        `Dedup race resolved for stored object ` +
+          `${input.storedObjectId}: ` +
+          `reusing ${canonicalObject.id}`,
+      );
+
+      return this.relinkVersionToStoredObject({
+        versionId: input.versionId,
+        duplicateStoredObjectId: input.storedObjectId,
+        duplicateObjectKey: input.objectKey,
+        canonicalStoredObject: canonicalObject,
+      });
+    }
+  }
+
+  private async relinkVersionToStoredObject(input: {
+    versionId: string;
+    duplicateStoredObjectId: string;
+    duplicateObjectKey: string;
+    canonicalStoredObject: {
+      id: string;
+      objectKey: string;
+      size: bigint;
+      sha256: string | null;
+    };
+  }): Promise<{
+    id: string;
+    objectKey: string;
+    size: bigint;
+    sha256: string | null;
+  }> {
+    const result = await this.prisma.$transaction(async (transaction) => {
+      const updatedVersion = await transaction.fileVersion.updateMany({
+        where: {
+          id: input.versionId,
+          storedObjectId: input.duplicateStoredObjectId,
+        },
+        data: {
+          storedObjectId: input.canonicalStoredObject.id,
+        },
+      });
+
+      if (updatedVersion.count === 0) {
+        const currentVersion = await transaction.fileVersion.findUnique({
+          where: {
+            id: input.versionId,
+          },
+          select: {
+            storedObjectId: true,
+          },
+        });
+
+        if (currentVersion?.storedObjectId === input.canonicalStoredObject.id) {
+          return {
+            shouldDeletePhysicalObject: false,
+          };
+        }
+
+        throw new PermanentFileProcessingError(
+          `File version ${input.versionId} ` +
+            `could not be relinked during deduplication`,
+        );
+      }
+
+      await transaction.storedObject.update({
+        where: {
+          id: input.canonicalStoredObject.id,
+        },
+        data: {
+          referenceCount: {
+            increment: 1,
+          },
+        },
+      });
+
+      const duplicateObject = await transaction.storedObject.findUnique({
+        where: {
+          id: input.duplicateStoredObjectId,
+        },
+        select: {
+          referenceCount: true,
+          _count: {
+            select: {
+              versions: true,
+            },
+          },
+        },
+      });
+
+      if (!duplicateObject) {
+        return {
+          shouldDeletePhysicalObject: false,
+        };
+      }
+
+      if (duplicateObject._count.versions === 0) {
+        const deletedObject = await transaction.storedObject.deleteMany({
+          where: {
+            id: input.duplicateStoredObjectId,
+            versions: {
+              none: {},
+            },
+          },
+        });
+
+        return {
+          shouldDeletePhysicalObject: deletedObject.count > 0,
+        };
+      }
+
+      await transaction.storedObject.update({
+        where: {
+          id: input.duplicateStoredObjectId,
+        },
+        data: {
+          referenceCount: {
+            decrement: 1,
+          },
+        },
+      });
+
+      return {
+        shouldDeletePhysicalObject: false,
+      };
+    });
+
+    if (result.shouldDeletePhysicalObject) {
+      try {
+        await this.objectStorage.deleteObject(input.duplicateObjectKey);
+
+        this.logger.log(
+          `Deleted duplicate physical object ` + `${input.duplicateObjectKey}`,
+        );
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+
+        this.logger.warn(
+          `Could not delete duplicate physical object ` +
+            `${input.duplicateObjectKey}: ${message}`,
+        );
+      }
+    }
+
+    return input.canonicalStoredObject;
+  }
+
+  private isPrismaUniqueConstraintError(error: unknown): boolean {
+    if (typeof error !== 'object' || error === null) {
+      return false;
+    }
+
+    return Reflect.get(error, 'code') === 'P2002';
   }
 
   private async handleFailedJob(

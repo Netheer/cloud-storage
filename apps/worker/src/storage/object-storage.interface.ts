@@ -10,6 +10,7 @@ export const OBJECT_STORAGE = Symbol('OBJECT_STORAGE');
 
 export interface ObjectStorage {
   getObjectStream(objectKey: string): Promise<Readable>;
+  deleteObject(objectKey: string): Promise<void>;
 
   putObject(input: PutObjectInput): Promise<void>;
 }

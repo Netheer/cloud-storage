@@ -6,6 +6,7 @@ import {
   PutObjectCommand,
   S3Client,
   S3ServiceException,
+  DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { Readable } from 'node:stream';
 import {
@@ -82,6 +83,15 @@ export class S3ObjectStorageService implements ObjectStorage, OnModuleDestroy {
         Body: input.body,
         ContentLength: input.body.byteLength,
         ContentType: input.contentType,
+      }),
+    );
+  }
+
+  async deleteObject(objectKey: string): Promise<void> {
+    await this.client.send(
+      new DeleteObjectCommand({
+        Bucket: this.bucket,
+        Key: objectKey,
       }),
     );
   }

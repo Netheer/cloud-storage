@@ -169,6 +169,7 @@ model StoredObject {
   versions FileVersion[]
 
   @@index([sha256, size])
+  @@unique([sha256, size])
 }
 
 model UploadSession {
