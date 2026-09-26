@@ -63,7 +63,9 @@ export const ModelName = {
   AuthSession: 'AuthSession',
   OutboxEvent: 'OutboxEvent',
   FolderPublicLink: 'FolderPublicLink',
-  FilePublicLink: 'FilePublicLink'
+  FilePublicLink: 'FilePublicLink',
+  ProcessingFailure: 'ProcessingFailure',
+  AuditLog: 'AuditLog'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -265,6 +267,33 @@ export const FilePublicLinkScalarFieldEnum = {
 export type FilePublicLinkScalarFieldEnum = (typeof FilePublicLinkScalarFieldEnum)[keyof typeof FilePublicLinkScalarFieldEnum]
 
 
+export const ProcessingFailureScalarFieldEnum = {
+  id: 'id',
+  fileId: 'fileId',
+  versionId: 'versionId',
+  jobId: 'jobId',
+  kind: 'kind',
+  reason: 'reason',
+  attempts: 'attempts',
+  failedAt: 'failedAt'
+} as const
+
+export type ProcessingFailureScalarFieldEnum = (typeof ProcessingFailureScalarFieldEnum)[keyof typeof ProcessingFailureScalarFieldEnum]
+
+
+export const AuditLogScalarFieldEnum = {
+  id: 'id',
+  actorUserId: 'actorUserId',
+  action: 'action',
+  resourceType: 'resourceType',
+  resourceId: 'resourceId',
+  metadata: 'metadata',
+  createdAt: 'createdAt'
+} as const
+
+export type AuditLogScalarFieldEnum = (typeof AuditLogScalarFieldEnum)[keyof typeof AuditLogScalarFieldEnum]
+
+
 export const SortOrder = {
   asc: 'asc',
   desc: 'desc'
@@ -278,6 +307,14 @@ export const JsonNullValueInput = {
 } as const
 
 export type JsonNullValueInput = (typeof JsonNullValueInput)[keyof typeof JsonNullValueInput]
+
+
+export const NullableJsonNullValueInput = {
+  DbNull: DbNull,
+  JsonNull: JsonNull
+} as const
+
+export type NullableJsonNullValueInput = (typeof NullableJsonNullValueInput)[keyof typeof NullableJsonNullValueInput]
 
 
 export const QueryMode = {

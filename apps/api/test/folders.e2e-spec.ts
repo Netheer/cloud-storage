@@ -1039,4 +1039,184 @@ describe('Folders (e2e)', () => {
       .send({})
       .expect(400);
   });
+
+  it('prevents moving a folder into itself or its descendant', async () => {
+    const root = await createFolder(ownerToken, 'Cycle Root');
+
+    const child = await createFolder(ownerToken, 'Cycle Child', root.id);
+
+    const grandchild = await createFolder(
+      ownerToken,
+      'Cycle Grandchild',
+      child.id,
+    );
+
+    await request(app.getHttpServer())
+      .patch(`/folders/${root.id}/move`)
+      .set(authorization(ownerToken))
+      .send({
+        parentId: root.id,
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .patch(`/folders/${root.id}/move`)
+      .set(authorization(ownerToken))
+      .send({
+        parentId: child.id,
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .patch(`/folders/${root.id}/move`)
+      .set(authorization(ownerToken))
+      .send({
+        parentId: grandchild.id,
+      })
+      .expect(400);
+
+    const storedRoot = await prisma.folder.findUnique({
+      where: {
+        id: root.id,
+      },
+      select: {
+        parentId: true,
+      },
+    });
+
+    const storedChild = await prisma.folder.findUnique({
+      where: {
+        id: child.id,
+      },
+      select: {
+        parentId: true,
+      },
+    });
+
+    const storedGrandchild = await prisma.folder.findUnique({
+      where: {
+        id: grandchild.id,
+      },
+      select: {
+        parentId: true,
+      },
+    });
+
+    expect(storedRoot?.parentId).toBeNull();
+    expect(storedChild?.parentId).toBe(root.id);
+    expect(storedGrandchild?.parentId).toBe(child.id);
+  });
+
+  it('validates folder names on create and rename', async () => {
+    await request(app.getHttpServer())
+      .post('/folders')
+      .set(authorization(ownerToken))
+      .send({
+        name: '   ',
+        parentId: null,
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/folders')
+      .set(authorization(ownerToken))
+      .send({
+        name: 'a'.repeat(256),
+        parentId: null,
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/folders')
+      .set(authorization(ownerToken))
+      .send({
+        name: 'invalid/name',
+        parentId: null,
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/folders')
+      .set(authorization(ownerToken))
+      .send({
+        name: 'invalid\\name',
+        parentId: null,
+      })
+      .expect(400);
+
+    const folder = await createFolder(ownerToken, '  Trimmed Folder  ');
+
+    expect(folder.name).toBe('Trimmed Folder');
+
+    await request(app.getHttpServer())
+      .patch(`/folders/${folder.id}`)
+      .set(authorization(ownerToken))
+      .send({
+        name: '   ',
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .patch(`/folders/${folder.id}`)
+      .set(authorization(ownerToken))
+      .send({
+        name: 'a'.repeat(256),
+      })
+      .expect(400);
+
+    const renameResponse = await request(app.getHttpServer())
+      .patch(`/folders/${folder.id}`)
+      .set(authorization(ownerToken))
+      .send({
+        name: '  Renamed Folder  ',
+      })
+      .expect(200);
+
+    expect(renameResponse.body).toMatchObject({
+      id: folder.id,
+      name: 'Renamed Folder',
+    });
+  });
+
+  it('removes a moved folder from an existing public folder tree', async () => {
+    const publicRoot = await createFolder(ownerToken, 'Public Move Root');
+
+    const outsideFolder = await createFolder(ownerToken, 'Public Move Outside');
+
+    const child = await createFolder(
+      ownerToken,
+      'Public Move Child',
+      publicRoot.id,
+    );
+
+    const linkResponse = await request(app.getHttpServer())
+      .post(`/folders/${publicRoot.id}/public-links`)
+      .set(authorization(ownerToken))
+      .send({})
+      .expect(201);
+
+    const link = linkResponse.body as {
+      token?: unknown;
+    };
+
+    if (typeof link.token !== 'string') {
+      throw new Error('Public link token is missing');
+    }
+
+    await request(app.getHttpServer())
+      .get(`/public/folders/${link.token}/folders/${child.id}`)
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/folders/${child.id}/move`)
+      .set(authorization(ownerToken))
+      .send({
+        parentId: outsideFolder.id,
+      })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .get(`/public/folders/${link.token}/folders/${child.id}`)
+      .expect(404);
+  });
 });

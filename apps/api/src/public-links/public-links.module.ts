@@ -5,9 +5,10 @@ import { PublicLinksController } from './public-links.controller';
 import { PublicLinksService } from './public-links.service';
 import { PublicAccessController } from './public-access.controller';
 import { StorageModule } from '../storage/storage.module';
+import { AuditModule } from '../audit/audit.module';
 
 @Module({
-  imports: [DatabaseModule, StorageModule],
+  imports: [DatabaseModule, StorageModule, AuditModule],
   controllers: [PublicLinksController, PublicAccessController],
   providers: [PublicLinksService, AccessService],
   exports: [PublicLinksService],

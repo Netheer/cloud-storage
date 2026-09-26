@@ -32,6 +32,7 @@ import type { FileResponseDto } from './dto/file-response.dto';
 import type { UploadFileDto } from './dto/upload-file.dto';
 import type { MoveFileDto } from './dto/move-file.dto';
 import type { FileVersionResponseDto } from './dto/file-version-response.dto';
+import { AuditService } from '../audit/audit.service';
 
 const SIMPLE_UPLOAD_MAX_SIZE_BYTES = 10n * 1024n * 1024n;
 const MULTIPART_UPLOAD_PART_SIZE_BYTES = 8n * 1024n * 1024n;
@@ -114,6 +115,7 @@ type FileRecord = {
 };
 
 type FinalizeMultipartUploadInput = {
+  actorUserId: string;
   resourceOwnerId: string;
   uploadSessionId: string;
   folderId: string | null;
@@ -132,6 +134,7 @@ export class FilesService {
     private readonly accessService: AccessService,
     @Inject(OBJECT_STORAGE)
     private readonly objectStorage: ObjectStorage,
+    private readonly auditService: AuditService,
   ) {}
 
   async upload(
@@ -244,6 +247,18 @@ export class FilesService {
 
       throw error;
     }
+
+    await this.auditService.write({
+      actorUserId: userId,
+      action: 'FILE_UPLOAD',
+      resourceType: 'FILE',
+      resourceId: createdFile.id,
+      metadata: {
+        name: createdFile.name,
+        folderId: createdFile.folderId,
+        size: createdFile.currentVersion?.size.toString(),
+      },
+    });
 
     return this.toResponseDto(createdFile);
   }
@@ -399,6 +414,17 @@ export class FilesService {
 
       throw error;
     }
+
+    await this.auditService.write({
+      actorUserId: userId,
+      action: 'FILE_VERSION_UPLOAD',
+      resourceType: 'FILE',
+      resourceId: fileId,
+      metadata: {
+        name: fileName,
+        size: file.size,
+      },
+    });
 
     return this.toResponseDto(updatedFile);
   }
@@ -874,6 +900,7 @@ export class FilesService {
       this.ensureCompletedObjectSize(existingObject.size, session.totalSize);
 
       return this.finalizeMultipartUploadMetadata({
+        actorUserId: ownerId,
         resourceOwnerId,
         uploadSessionId: session.id,
         folderId: session.folderId,
@@ -947,6 +974,7 @@ export class FilesService {
     this.ensureCompletedObjectSize(completedObject.size, session.totalSize);
 
     return this.finalizeMultipartUploadMetadata({
+      actorUserId: ownerId,
       resourceOwnerId,
       uploadSessionId: session.id,
       folderId: session.folderId,
@@ -955,6 +983,74 @@ export class FilesService {
       mimeType: session.mimeType,
       totalSize: session.totalSize,
     });
+  }
+
+  async retryProcessing(
+    userId: string,
+    fileId: string,
+  ): Promise<FileResponseDto> {
+    await this.accessService.requireFileRole(userId, fileId, 'EDITOR');
+
+    const retriedFile = await this.prisma.$transaction(async (transaction) => {
+      const file = await transaction.file.findFirst({
+        where: {
+          id: fileId,
+          status: 'FAILED',
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+          currentVersionId: true,
+          currentVersion: {
+            select: {
+              id: true,
+              storedObjectId: true,
+            },
+          },
+        },
+      });
+
+      if (!file) {
+        throw new ConflictException('Only a failed file can be reprocessed');
+      }
+
+      if (!file.currentVersionId || !file.currentVersion) {
+        throw new InternalServerErrorException('File metadata is incomplete');
+      }
+
+      const updatedFile = await transaction.file.update({
+        where: {
+          id: file.id,
+        },
+        data: {
+          status: 'PROCESSING',
+        },
+        select: FILE_SELECT,
+      });
+
+      await transaction.outboxEvent.create({
+        data: {
+          type: PROCESS_FILE_OUTBOX_EVENT_TYPE,
+          aggregateId: file.id,
+          payload: {
+            fileId: file.id,
+            versionId: file.currentVersion.id,
+            storedObjectId: file.currentVersion.storedObjectId,
+          },
+        },
+      });
+
+      return updatedFile;
+    });
+
+    await this.auditService.write({
+      actorUserId: userId,
+      action: 'FILE_PROCESSING_RETRY',
+      resourceType: 'FILE',
+      resourceId: fileId,
+    });
+
+    return this.toResponseDto(retriedFile);
   }
 
   async abortMultipartUpload(
@@ -1378,6 +1474,16 @@ export class FilesService {
       return processingFile;
     });
 
+    await this.auditService.write({
+      actorUserId: userId,
+      action: 'FILE_VERSION_RESTORE',
+      resourceType: 'FILE',
+      resourceId: fileId,
+      metadata: {
+        sourceVersionId: versionId,
+      },
+    });
+
     return this.toResponseDto(restoredFile);
   }
 
@@ -1511,6 +1617,7 @@ export class FilesService {
       },
       select: {
         id: true,
+        name: true,
       },
     });
 
@@ -1528,6 +1635,17 @@ export class FilesService {
         name,
       },
       select: FILE_SELECT,
+    });
+
+    await this.auditService.write({
+      actorUserId: userId,
+      action: 'FILE_RENAME',
+      resourceType: 'FILE',
+      resourceId: file.id,
+      metadata: {
+        oldName: file.name,
+        newName: updatedFile.name,
+      },
     });
 
     return this.toResponseDto(updatedFile);
@@ -1575,6 +1693,16 @@ export class FilesService {
         select: FILE_SELECT,
       });
 
+      await this.auditService.write({
+        actorUserId: userId,
+        action: 'FILE_MOVE',
+        resourceType: 'FILE',
+        resourceId: file.id,
+        metadata: {
+          destinationFolderId: null,
+        },
+      });
+
       return this.toResponseDto(movedFile);
     }
 
@@ -1614,6 +1742,16 @@ export class FilesService {
         folderId: dto.folderId,
       },
       select: FILE_SELECT,
+    });
+
+    await this.auditService.write({
+      actorUserId: userId,
+      action: 'FILE_MOVE',
+      resourceType: 'FILE',
+      resourceId: file.id,
+      metadata: {
+        destinationFolderId: dto.folderId,
+      },
     });
 
     return this.toResponseDto(movedFile);
@@ -1737,6 +1875,8 @@ export class FilesService {
       }
     }
 
+    let fileDeleted = false;
+
     await this.prisma.$transaction(async (transaction) => {
       const deletedFile = await transaction.file.deleteMany({
         where: {
@@ -1749,6 +1889,8 @@ export class FilesService {
       if (deletedFile.count === 0) {
         return;
       }
+
+      fileDeleted = true;
 
       for (const storedObject of storedObjects.values()) {
         const shouldDeleteStoredObject =
@@ -1780,6 +1922,15 @@ export class FilesService {
         });
       }
     });
+
+    if (fileDeleted) {
+      await this.auditService.write({
+        actorUserId: ownerId,
+        action: 'FILE_DELETE',
+        resourceType: 'FILE',
+        resourceId: fileId,
+      });
+    }
   }
 
   private normalizeMimeType(mimeType?: string): string | null {
@@ -2346,6 +2497,23 @@ export class FilesService {
           },
         });
 
+        await this.auditService.write(
+          {
+            actorUserId: input.actorUserId,
+            action: 'FILE_VERSION_UPLOAD',
+            resourceType: 'FILE',
+            resourceId: targetFileId,
+            metadata: {
+              multipart: true,
+              versionId: version.id,
+              versionNumber: nextVersionNumber,
+              name: input.originalName,
+              size: input.totalSize.toString(),
+            },
+          },
+          transaction,
+        );
+
         return targetFileId;
       }
 
@@ -2420,6 +2588,22 @@ export class FilesService {
           },
         },
       });
+
+      await this.auditService.write(
+        {
+          actorUserId: input.actorUserId,
+          action: 'FILE_UPLOAD',
+          resourceType: 'FILE',
+          resourceId: fileMetadata.id,
+          metadata: {
+            multipart: true,
+            name: input.originalName,
+            folderId: input.folderId,
+            size: input.totalSize.toString(),
+          },
+        },
+        transaction,
+      );
 
       return fileMetadata.id;
     });

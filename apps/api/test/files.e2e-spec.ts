@@ -5047,4 +5047,241 @@ describe('Files (e2e)', () => {
 
     expect(createPresignedDownloadUrlMock).not.toHaveBeenCalled();
   });
+
+  it('retries processing for a failed file', async () => {
+    const uploadedFile = await uploadFile(
+      owner.accessToken,
+      'retry-processing.txt',
+      Buffer.from('retry-processing'),
+    );
+
+    const file = await prisma.file.findUnique({
+      where: {
+        id: uploadedFile.id,
+      },
+      select: {
+        currentVersionId: true,
+      },
+    });
+
+    expect(file?.currentVersionId).toBeTruthy();
+
+    await prisma.file.update({
+      where: {
+        id: uploadedFile.id,
+      },
+      data: {
+        status: 'FAILED',
+      },
+    });
+
+    const response = await request(app.getHttpServer())
+      .post(`/files/${uploadedFile.id}/retry-processing`)
+      .set(authorization(owner.accessToken))
+      .expect(200);
+
+    const body = response.body as FileBody;
+
+    expect(body.status).toBe('PROCESSING');
+
+    const updatedFile = await prisma.file.findUnique({
+      where: {
+        id: uploadedFile.id,
+      },
+      select: {
+        status: true,
+        currentVersionId: true,
+      },
+    });
+
+    expect(updatedFile?.status).toBe('PROCESSING');
+    expect(updatedFile?.currentVersionId).toBe(file?.currentVersionId);
+
+    const outboxEvent = await prisma.outboxEvent.findFirst({
+      where: {
+        aggregateId: uploadedFile.id,
+        type: 'PROCESS_FILE',
+        publishedAt: null,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    expect(outboxEvent).not.toBeNull();
+
+    expect(outboxEvent?.payload).toMatchObject({
+      fileId: uploadedFile.id,
+      versionId: file?.currentVersionId,
+    });
+  });
+
+  it('rejects retry-processing for a non-failed file', async () => {
+    const uploadedFile = await uploadFile(
+      owner.accessToken,
+      'retry-processing-ready.txt',
+      Buffer.from('ready-file'),
+    );
+
+    await markFileReady(uploadedFile.id);
+
+    await request(app.getHttpServer())
+      .post(`/files/${uploadedFile.id}/retry-processing`)
+      .set(authorization(owner.accessToken))
+      .expect(409);
+  });
+
+  it('validates file names and multipart size boundaries', async () => {
+    await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: '   ',
+        totalSize: String(10 * 1024 * 1024 + 1),
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'a'.repeat(256),
+        totalSize: String(10 * 1024 * 1024 + 1),
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'control\u0001.txt',
+        totalSize: String(10 * 1024 * 1024 + 1),
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'exact-threshold.bin',
+        totalSize: String(10 * 1024 * 1024),
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'above-threshold.bin',
+        totalSize: String(10 * 1024 * 1024 + 1),
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'too-large.bin',
+        totalSize: String(5n * 1024n * 1024n * 1024n + 1n),
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/files/multipart')
+      .set(authorization(owner.accessToken))
+      .send({
+        clientRequestId: randomUUID(),
+        fileName: 'below-threshold.bin',
+        totalSize: String(10 * 1024 * 1024 - 1),
+      })
+      .expect(400);
+
+    const zeroByteResponse = await request(app.getHttpServer())
+      .post('/files/upload')
+      .set(authorization(owner.accessToken))
+      .attach('file', Buffer.alloc(0), {
+        filename: 'empty.txt',
+        contentType: 'text/plain',
+      })
+      .expect(201);
+
+    expect(zeroByteResponse.body).toMatchObject({
+      name: 'empty.txt',
+      size: '0',
+    });
+  });
+
+  it('updates inherited access when a file moves between shared and private folders', async () => {
+    const targetEmail = createTestEmail('files.move-access');
+    const targetUser = await registerAndLogin(targetEmail);
+
+    const sharedFolderId = await createFolder(
+      owner.accessToken,
+      'Move Access Shared',
+    );
+
+    const privateFolderId = await createFolder(
+      owner.accessToken,
+      'Move Access Private',
+    );
+
+    const file = await uploadFile(
+      owner.accessToken,
+      'move-access.txt',
+      Buffer.from('Move access content'),
+      sharedFolderId,
+    );
+
+    await markFileReady(file.id);
+
+    await request(app.getHttpServer())
+      .post(`/folders/${sharedFolderId}/shares`)
+      .set(authorization(owner.accessToken))
+      .send({
+        email: targetEmail,
+        role: 'VIEWER',
+      })
+      .expect(201);
+
+    // Inherited access существует.
+    await request(app.getHttpServer())
+      .get(`/files/${file.id}/download`)
+      .set(authorization(targetUser.accessToken))
+      .expect(200);
+
+    // OWNER переносит файл в private folder.
+    await request(app.getHttpServer())
+      .patch(`/files/${file.id}/move`)
+      .set(authorization(owner.accessToken))
+      .send({
+        folderId: privateFolderId,
+      })
+      .expect(200);
+
+    // Старый inherited grant больше не должен работать.
+    await request(app.getHttpServer())
+      .get(`/files/${file.id}/download`)
+      .set(authorization(targetUser.accessToken))
+      .expect(404);
+
+    // Возвращаем обратно в shared tree.
+    await request(app.getHttpServer())
+      .patch(`/files/${file.id}/move`)
+      .set(authorization(owner.accessToken))
+      .send({
+        folderId: sharedFolderId,
+      })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .get(`/files/${file.id}/download`)
+      .set(authorization(targetUser.accessToken))
+      .expect(200);
+  });
 });

@@ -104,3 +104,13 @@ export type FolderPublicLink = Prisma.FolderPublicLinkModel
  * 
  */
 export type FilePublicLink = Prisma.FilePublicLinkModel
+/**
+ * Model ProcessingFailure
+ * 
+ */
+export type ProcessingFailure = Prisma.ProcessingFailureModel
+/**
+ * Model AuditLog
+ * 
+ */
+export type AuditLog = Prisma.AuditLogModel

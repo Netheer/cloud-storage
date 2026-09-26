@@ -819,6 +819,39 @@ export class FilesController {
     return this.filesService.remove(user.id, fileId);
   }
 
+  @Post(':id/retry-processing')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Retry background processing for a failed file',
+  })
+  @ApiParam({
+    name: 'id',
+    format: 'uuid',
+    description: 'File ID',
+  })
+  @ApiOkResponse({
+    description: 'File processing restarted successfully',
+    type: FileResponseDto,
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Access token is missing or invalid',
+  })
+  @ApiForbiddenResponse({
+    description: 'Editor access is required',
+  })
+  @ApiNotFoundResponse({
+    description: 'File not found',
+  })
+  @ApiConflictResponse({
+    description: 'Only a failed file can be reprocessed',
+  })
+  retryProcessing(
+    @CurrentUser() user: UserResponseDto,
+    @Param('id', ParseUUIDPipe) fileId: string,
+  ): Promise<FileResponseDto> {
+    return this.filesService.retryProcessing(user.id, fileId);
+  }
+
   @Get('shared-with-me')
   @ApiOperation({
     summary: 'List files shared directly with the current user',

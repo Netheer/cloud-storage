@@ -409,7 +409,9 @@ export const ModelName = {
   AuthSession: 'AuthSession',
   OutboxEvent: 'OutboxEvent',
   FolderPublicLink: 'FolderPublicLink',
-  FilePublicLink: 'FilePublicLink'
+  FilePublicLink: 'FilePublicLink',
+  ProcessingFailure: 'ProcessingFailure',
+  AuditLog: 'AuditLog'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -425,7 +427,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "user" | "folder" | "file" | "folderAccessGrant" | "fileAccessGrant" | "fileVersion" | "storedObject" | "uploadSession" | "uploadPart" | "authSession" | "outboxEvent" | "folderPublicLink" | "filePublicLink"
+    modelProps: "user" | "folder" | "file" | "folderAccessGrant" | "fileAccessGrant" | "fileVersion" | "storedObject" | "uploadSession" | "uploadPart" | "authSession" | "outboxEvent" | "folderPublicLink" | "filePublicLink" | "processingFailure" | "auditLog"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -1391,6 +1393,154 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    ProcessingFailure: {
+      payload: Prisma.$ProcessingFailurePayload<ExtArgs>
+      fields: Prisma.ProcessingFailureFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.ProcessingFailureFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ProcessingFailurePayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.ProcessingFailureFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ProcessingFailurePayload>
+        }
+        findFirst: {
+          args: Prisma.ProcessingFailureFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ProcessingFailurePayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.ProcessingFailureFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ProcessingFailurePayload>
+        }
+        findMany: {
+          args: Prisma.ProcessingFailureFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ProcessingFailurePayload>[]
+        }
+        create: {
+          args: Prisma.ProcessingFailureCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ProcessingFailurePayload>
+        }
+        createMany: {
+          args: Prisma.ProcessingFailureCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.ProcessingFailureCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ProcessingFailurePayload>[]
+        }
+        delete: {
+          args: Prisma.ProcessingFailureDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ProcessingFailurePayload>
+        }
+        update: {
+          args: Prisma.ProcessingFailureUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ProcessingFailurePayload>
+        }
+        deleteMany: {
+          args: Prisma.ProcessingFailureDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.ProcessingFailureUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.ProcessingFailureUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ProcessingFailurePayload>[]
+        }
+        upsert: {
+          args: Prisma.ProcessingFailureUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ProcessingFailurePayload>
+        }
+        aggregate: {
+          args: Prisma.ProcessingFailureAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateProcessingFailure>
+        }
+        groupBy: {
+          args: Prisma.ProcessingFailureGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.ProcessingFailureGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.ProcessingFailureCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.ProcessingFailureCountAggregateOutputType> | number
+        }
+      }
+    }
+    AuditLog: {
+      payload: Prisma.$AuditLogPayload<ExtArgs>
+      fields: Prisma.AuditLogFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.AuditLogFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AuditLogPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.AuditLogFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AuditLogPayload>
+        }
+        findFirst: {
+          args: Prisma.AuditLogFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AuditLogPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.AuditLogFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AuditLogPayload>
+        }
+        findMany: {
+          args: Prisma.AuditLogFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AuditLogPayload>[]
+        }
+        create: {
+          args: Prisma.AuditLogCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AuditLogPayload>
+        }
+        createMany: {
+          args: Prisma.AuditLogCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.AuditLogCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AuditLogPayload>[]
+        }
+        delete: {
+          args: Prisma.AuditLogDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AuditLogPayload>
+        }
+        update: {
+          args: Prisma.AuditLogUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AuditLogPayload>
+        }
+        deleteMany: {
+          args: Prisma.AuditLogDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.AuditLogUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.AuditLogUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AuditLogPayload>[]
+        }
+        upsert: {
+          args: Prisma.AuditLogUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AuditLogPayload>
+        }
+        aggregate: {
+          args: Prisma.AuditLogAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateAuditLog>
+        }
+        groupBy: {
+          args: Prisma.AuditLogGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AuditLogGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.AuditLogCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AuditLogCountAggregateOutputType> | number
+        }
+      }
+    }
   }
 } & {
   other: {
@@ -1613,6 +1763,33 @@ export const FilePublicLinkScalarFieldEnum = {
 export type FilePublicLinkScalarFieldEnum = (typeof FilePublicLinkScalarFieldEnum)[keyof typeof FilePublicLinkScalarFieldEnum]
 
 
+export const ProcessingFailureScalarFieldEnum = {
+  id: 'id',
+  fileId: 'fileId',
+  versionId: 'versionId',
+  jobId: 'jobId',
+  kind: 'kind',
+  reason: 'reason',
+  attempts: 'attempts',
+  failedAt: 'failedAt'
+} as const
+
+export type ProcessingFailureScalarFieldEnum = (typeof ProcessingFailureScalarFieldEnum)[keyof typeof ProcessingFailureScalarFieldEnum]
+
+
+export const AuditLogScalarFieldEnum = {
+  id: 'id',
+  actorUserId: 'actorUserId',
+  action: 'action',
+  resourceType: 'resourceType',
+  resourceId: 'resourceId',
+  metadata: 'metadata',
+  createdAt: 'createdAt'
+} as const
+
+export type AuditLogScalarFieldEnum = (typeof AuditLogScalarFieldEnum)[keyof typeof AuditLogScalarFieldEnum]
+
+
 export const SortOrder = {
   asc: 'asc',
   desc: 'desc'
@@ -1626,6 +1803,14 @@ export const JsonNullValueInput = {
 } as const
 
 export type JsonNullValueInput = (typeof JsonNullValueInput)[keyof typeof JsonNullValueInput]
+
+
+export const NullableJsonNullValueInput = {
+  DbNull: DbNull,
+  JsonNull: JsonNull
+} as const
+
+export type NullableJsonNullValueInput = (typeof NullableJsonNullValueInput)[keyof typeof NullableJsonNullValueInput]
 
 
 export const QueryMode = {
@@ -1768,6 +1953,48 @@ export type JsonFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'J
  * Reference to a field of type 'QueryMode'
  */
 export type EnumQueryModeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'QueryMode'>
+    
+
+
+/**
+ * Reference to a field of type 'ProcessingFailureKind'
+ */
+export type EnumProcessingFailureKindFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'ProcessingFailureKind'>
+    
+
+
+/**
+ * Reference to a field of type 'ProcessingFailureKind[]'
+ */
+export type ListEnumProcessingFailureKindFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'ProcessingFailureKind[]'>
+    
+
+
+/**
+ * Reference to a field of type 'AuditAction'
+ */
+export type EnumAuditActionFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'AuditAction'>
+    
+
+
+/**
+ * Reference to a field of type 'AuditAction[]'
+ */
+export type ListEnumAuditActionFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'AuditAction[]'>
+    
+
+
+/**
+ * Reference to a field of type 'AuditResourceType'
+ */
+export type EnumAuditResourceTypeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'AuditResourceType'>
+    
+
+
+/**
+ * Reference to a field of type 'AuditResourceType[]'
+ */
+export type ListEnumAuditResourceTypeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'AuditResourceType[]'>
     
 
 
@@ -1948,6 +2175,8 @@ export type GlobalOmitConfig = {
   outboxEvent?: Prisma.OutboxEventOmit
   folderPublicLink?: Prisma.FolderPublicLinkOmit
   filePublicLink?: Prisma.FilePublicLinkOmit
+  processingFailure?: Prisma.ProcessingFailureOmit
+  auditLog?: Prisma.AuditLogOmit
 }
 
 /* Types for Logging */

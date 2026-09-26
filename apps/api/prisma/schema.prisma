@@ -96,6 +96,8 @@ model File {
 
   publicLinks FilePublicLink[]
 
+  processingFailures ProcessingFailure[]
+
   @@index([ownerId])
   @@index([folderId])
 }
@@ -154,6 +156,8 @@ model FileVersion {
   storedObject StoredObject @relation(fields: [storedObjectId], references: [id], onDelete: Restrict)
   currentFor   File?        @relation("CurrentFileVersion")
 
+  processingFailures ProcessingFailure[]
+
   @@unique([fileId, versionNumber])
   @@index([storedObjectId])
 }
@@ -198,6 +202,7 @@ model UploadSession {
   @@unique([ownerId, clientRequestId])
   @@index([ownerId])
   @@index([status, expiresAt])
+  @@index([status, updatedAt])
 }
 
 model UploadPart {
@@ -269,4 +274,68 @@ model FilePublicLink {
 
   @@index([fileId])
   @@index([expiresAt])
+}
+
+enum ProcessingFailureKind {
+  RECOVERABLE_EXHAUSTED
+  UNRECOVERABLE
+}
+
+model ProcessingFailure {
+  id         String                @id @default(uuid()) @db.Uuid
+  fileId     String                @db.Uuid
+  versionId  String                @db.Uuid
+  jobId      String?
+  kind       ProcessingFailureKind
+  reason     String
+  attempts   Int
+  failedAt   DateTime              @default(now())
+
+  file       File                  @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  version    FileVersion           @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@index([fileId, failedAt])
+  @@index([versionId, failedAt])
+}
+
+enum AuditAction {
+  FILE_UPLOAD
+  FILE_DELETE
+  FILE_RENAME
+  FILE_MOVE
+  FILE_VERSION_UPLOAD
+  FILE_VERSION_RESTORE
+  FILE_PROCESSING_RETRY
+
+  FOLDER_CREATE
+  FOLDER_DELETE
+  FOLDER_RENAME
+  FOLDER_MOVE
+
+  SHARE_CREATE
+  SHARE_UPDATE
+  SHARE_REVOKE
+
+  PUBLIC_LINK_CREATE
+  PUBLIC_LINK_REVOKE
+}
+
+enum AuditResourceType {
+  FILE
+  FOLDER
+  SHARE
+  PUBLIC_LINK
+}
+
+model AuditLog {
+  id           String            @id @default(uuid()) @db.Uuid
+  actorUserId  String            @db.Uuid
+  action       AuditAction
+  resourceType AuditResourceType
+  resourceId   String            @db.Uuid
+  metadata     Json?
+  createdAt    DateTime          @default(now())
+
+  @@index([actorUserId, createdAt])
+  @@index([resourceType, resourceId, createdAt])
 }

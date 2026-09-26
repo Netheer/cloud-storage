@@ -532,6 +532,12 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
           `file will be marked FAILED`,
       );
 
+      await this.recordProcessingFailure({
+        job,
+        error,
+        kind: 'UNRECOVERABLE',
+      });
+
       await this.markFileFailed(job.data.fileId, job.data.versionId);
 
       return;
@@ -549,7 +555,37 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    await this.recordProcessingFailure({
+      job,
+      error,
+      kind: 'RECOVERABLE_EXHAUSTED',
+    });
+
     await this.markFileFailed(job.data.fileId, job.data.versionId);
+  }
+
+  private async recordProcessingFailure(input: {
+    job: Job<ProcessFileJob>;
+    error: Error;
+    kind: 'RECOVERABLE_EXHAUSTED' | 'UNRECOVERABLE';
+  }): Promise<void> {
+    await this.prisma.processingFailure.create({
+      data: {
+        fileId: input.job.data.fileId,
+        versionId: input.job.data.versionId,
+        jobId: input.job.id ?? null,
+        kind: input.kind,
+        reason: input.error.message,
+        attempts: input.job.attemptsMade,
+      },
+    });
+
+    this.logger.warn(
+      `Recorded processing failure for job ${input.job.id ?? 'unknown'}: ` +
+        `kind=${input.kind}, ` +
+        `attempts=${input.job.attemptsMade}, ` +
+        `reason=${input.error.message}`,
+    );
   }
 
   private async markFileFailed(
@@ -593,6 +629,15 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(
         `File ${fileId} is already READY; ` +
           `FAILED state will not overwrite it`,
+      );
+
+      return;
+    }
+
+    if (file && file.currentVersionId !== versionId) {
+      this.logger.warn(
+        `File version ${versionId} is historical; ` +
+          `FAILED transition is not required`,
       );
 
       return;
@@ -844,6 +889,15 @@ export class FileProcessingWorker implements OnModuleInit, OnModuleDestroy {
 
     if (file?.currentVersionId === versionId && file.status === 'READY') {
       this.logger.log(`File ${fileId} is already READY`);
+
+      return;
+    }
+
+    if (file && file.currentVersionId !== versionId) {
+      this.logger.log(
+        `File version ${versionId} is historical; ` +
+          `READY transition is not required`,
+      );
 
       return;
     }

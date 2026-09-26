@@ -13,6 +13,7 @@ import {
   UploadPartCommand,
   HeadObjectCommand,
   S3ServiceException,
+  ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
@@ -27,6 +28,8 @@ import {
   type ObjectStorage,
   type PutObjectInput,
   type ObjectMetadata,
+  type ListObjectsInput,
+  type ListObjectsResult,
 } from './object-storage.interface';
 
 @Injectable()
@@ -266,6 +269,61 @@ export class S3ObjectStorageService implements ObjectStorage, OnModuleDestroy {
         error.$metadata.httpStatusCode === 404
       ) {
         return;
+      }
+
+      throw error;
+    }
+  }
+
+  async listObjects(input: ListObjectsInput = {}): Promise<ListObjectsResult> {
+    const result = await this.client.send(
+      new ListObjectsV2Command({
+        Bucket: this.bucket,
+        ContinuationToken: input.continuationToken,
+        MaxKeys: input.maxKeys,
+      }),
+    );
+
+    const objects =
+      result.Contents?.flatMap((object) => {
+        if (!object.Key) {
+          return [];
+        }
+
+        return [
+          {
+            objectKey: object.Key,
+            size: object.Size ?? 0,
+            lastModified: object.LastModified ?? null,
+          },
+        ];
+      }) ?? [];
+
+    return {
+      objects,
+      nextContinuationToken:
+        result.IsTruncated && result.NextContinuationToken
+          ? result.NextContinuationToken
+          : null,
+    };
+  }
+
+  async objectExists(objectKey: string): Promise<boolean> {
+    try {
+      await this.client.send(
+        new HeadObjectCommand({
+          Bucket: this.bucket,
+          Key: objectKey,
+        }),
+      );
+
+      return true;
+    } catch (error: unknown) {
+      if (
+        error instanceof S3ServiceException &&
+        error.$metadata.httpStatusCode === 404
+      ) {
+        return false;
       }
 
       throw error;

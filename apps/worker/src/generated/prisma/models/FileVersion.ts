@@ -319,6 +319,7 @@ export type FileVersionWhereInput = {
   file?: Prisma.XOR<Prisma.FileScalarRelationFilter, Prisma.FileWhereInput>
   storedObject?: Prisma.XOR<Prisma.StoredObjectScalarRelationFilter, Prisma.StoredObjectWhereInput>
   currentFor?: Prisma.XOR<Prisma.FileNullableScalarRelationFilter, Prisma.FileWhereInput> | null
+  processingFailures?: Prisma.ProcessingFailureListRelationFilter
 }
 
 export type FileVersionOrderByWithRelationInput = {
@@ -340,6 +341,7 @@ export type FileVersionOrderByWithRelationInput = {
   file?: Prisma.FileOrderByWithRelationInput
   storedObject?: Prisma.StoredObjectOrderByWithRelationInput
   currentFor?: Prisma.FileOrderByWithRelationInput
+  processingFailures?: Prisma.ProcessingFailureOrderByRelationAggregateInput
 }
 
 export type FileVersionWhereUniqueInput = Prisma.AtLeast<{
@@ -365,6 +367,7 @@ export type FileVersionWhereUniqueInput = Prisma.AtLeast<{
   file?: Prisma.XOR<Prisma.FileScalarRelationFilter, Prisma.FileWhereInput>
   storedObject?: Prisma.XOR<Prisma.StoredObjectScalarRelationFilter, Prisma.StoredObjectWhereInput>
   currentFor?: Prisma.XOR<Prisma.FileNullableScalarRelationFilter, Prisma.FileWhereInput> | null
+  processingFailures?: Prisma.ProcessingFailureListRelationFilter
 }, "id" | "previewObjectKey" | "fileId_versionNumber">
 
 export type FileVersionOrderByWithAggregationInput = {
@@ -428,6 +431,7 @@ export type FileVersionCreateInput = {
   file: Prisma.FileCreateNestedOneWithoutVersionsInput
   storedObject: Prisma.StoredObjectCreateNestedOneWithoutVersionsInput
   currentFor?: Prisma.FileCreateNestedOneWithoutCurrentVersionInput
+  processingFailures?: Prisma.ProcessingFailureCreateNestedManyWithoutVersionInput
 }
 
 export type FileVersionUncheckedCreateInput = {
@@ -447,6 +451,7 @@ export type FileVersionUncheckedCreateInput = {
   previewHeight?: number | null
   createdAt?: Date | string
   currentFor?: Prisma.FileUncheckedCreateNestedOneWithoutCurrentVersionInput
+  processingFailures?: Prisma.ProcessingFailureUncheckedCreateNestedManyWithoutVersionInput
 }
 
 export type FileVersionUpdateInput = {
@@ -466,6 +471,7 @@ export type FileVersionUpdateInput = {
   file?: Prisma.FileUpdateOneRequiredWithoutVersionsNestedInput
   storedObject?: Prisma.StoredObjectUpdateOneRequiredWithoutVersionsNestedInput
   currentFor?: Prisma.FileUpdateOneWithoutCurrentVersionNestedInput
+  processingFailures?: Prisma.ProcessingFailureUpdateManyWithoutVersionNestedInput
 }
 
 export type FileVersionUncheckedUpdateInput = {
@@ -485,6 +491,7 @@ export type FileVersionUncheckedUpdateInput = {
   previewHeight?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   currentFor?: Prisma.FileUncheckedUpdateOneWithoutCurrentVersionNestedInput
+  processingFailures?: Prisma.ProcessingFailureUncheckedUpdateManyWithoutVersionNestedInput
 }
 
 export type FileVersionCreateManyInput = {
@@ -631,6 +638,11 @@ export type FileVersionSumOrderByAggregateInput = {
   previewHeight?: Prisma.SortOrder
 }
 
+export type FileVersionScalarRelationFilter = {
+  is?: Prisma.FileVersionWhereInput
+  isNot?: Prisma.FileVersionWhereInput
+}
+
 export type FileVersionCreateNestedManyWithoutFileInput = {
   create?: Prisma.XOR<Prisma.FileVersionCreateWithoutFileInput, Prisma.FileVersionUncheckedCreateWithoutFileInput> | Prisma.FileVersionCreateWithoutFileInput[] | Prisma.FileVersionUncheckedCreateWithoutFileInput[]
   connectOrCreate?: Prisma.FileVersionCreateOrConnectWithoutFileInput | Prisma.FileVersionCreateOrConnectWithoutFileInput[]
@@ -755,6 +767,20 @@ export type FileVersionUncheckedUpdateManyWithoutStoredObjectNestedInput = {
   deleteMany?: Prisma.FileVersionScalarWhereInput | Prisma.FileVersionScalarWhereInput[]
 }
 
+export type FileVersionCreateNestedOneWithoutProcessingFailuresInput = {
+  create?: Prisma.XOR<Prisma.FileVersionCreateWithoutProcessingFailuresInput, Prisma.FileVersionUncheckedCreateWithoutProcessingFailuresInput>
+  connectOrCreate?: Prisma.FileVersionCreateOrConnectWithoutProcessingFailuresInput
+  connect?: Prisma.FileVersionWhereUniqueInput
+}
+
+export type FileVersionUpdateOneRequiredWithoutProcessingFailuresNestedInput = {
+  create?: Prisma.XOR<Prisma.FileVersionCreateWithoutProcessingFailuresInput, Prisma.FileVersionUncheckedCreateWithoutProcessingFailuresInput>
+  connectOrCreate?: Prisma.FileVersionCreateOrConnectWithoutProcessingFailuresInput
+  upsert?: Prisma.FileVersionUpsertWithoutProcessingFailuresInput
+  connect?: Prisma.FileVersionWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.FileVersionUpdateToOneWithWhereWithoutProcessingFailuresInput, Prisma.FileVersionUpdateWithoutProcessingFailuresInput>, Prisma.FileVersionUncheckedUpdateWithoutProcessingFailuresInput>
+}
+
 export type FileVersionCreateWithoutFileInput = {
   id?: string
   versionNumber: number
@@ -771,6 +797,7 @@ export type FileVersionCreateWithoutFileInput = {
   createdAt?: Date | string
   storedObject: Prisma.StoredObjectCreateNestedOneWithoutVersionsInput
   currentFor?: Prisma.FileCreateNestedOneWithoutCurrentVersionInput
+  processingFailures?: Prisma.ProcessingFailureCreateNestedManyWithoutVersionInput
 }
 
 export type FileVersionUncheckedCreateWithoutFileInput = {
@@ -789,6 +816,7 @@ export type FileVersionUncheckedCreateWithoutFileInput = {
   previewHeight?: number | null
   createdAt?: Date | string
   currentFor?: Prisma.FileUncheckedCreateNestedOneWithoutCurrentVersionInput
+  processingFailures?: Prisma.ProcessingFailureUncheckedCreateNestedManyWithoutVersionInput
 }
 
 export type FileVersionCreateOrConnectWithoutFileInput = {
@@ -817,6 +845,7 @@ export type FileVersionCreateWithoutCurrentForInput = {
   createdAt?: Date | string
   file: Prisma.FileCreateNestedOneWithoutVersionsInput
   storedObject: Prisma.StoredObjectCreateNestedOneWithoutVersionsInput
+  processingFailures?: Prisma.ProcessingFailureCreateNestedManyWithoutVersionInput
 }
 
 export type FileVersionUncheckedCreateWithoutCurrentForInput = {
@@ -835,6 +864,7 @@ export type FileVersionUncheckedCreateWithoutCurrentForInput = {
   previewWidth?: number | null
   previewHeight?: number | null
   createdAt?: Date | string
+  processingFailures?: Prisma.ProcessingFailureUncheckedCreateNestedManyWithoutVersionInput
 }
 
 export type FileVersionCreateOrConnectWithoutCurrentForInput = {
@@ -906,6 +936,7 @@ export type FileVersionUpdateWithoutCurrentForInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   file?: Prisma.FileUpdateOneRequiredWithoutVersionsNestedInput
   storedObject?: Prisma.StoredObjectUpdateOneRequiredWithoutVersionsNestedInput
+  processingFailures?: Prisma.ProcessingFailureUpdateManyWithoutVersionNestedInput
 }
 
 export type FileVersionUncheckedUpdateWithoutCurrentForInput = {
@@ -924,6 +955,7 @@ export type FileVersionUncheckedUpdateWithoutCurrentForInput = {
   previewWidth?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   previewHeight?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  processingFailures?: Prisma.ProcessingFailureUncheckedUpdateManyWithoutVersionNestedInput
 }
 
 export type FileVersionCreateWithoutStoredObjectInput = {
@@ -942,6 +974,7 @@ export type FileVersionCreateWithoutStoredObjectInput = {
   createdAt?: Date | string
   file: Prisma.FileCreateNestedOneWithoutVersionsInput
   currentFor?: Prisma.FileCreateNestedOneWithoutCurrentVersionInput
+  processingFailures?: Prisma.ProcessingFailureCreateNestedManyWithoutVersionInput
 }
 
 export type FileVersionUncheckedCreateWithoutStoredObjectInput = {
@@ -960,6 +993,7 @@ export type FileVersionUncheckedCreateWithoutStoredObjectInput = {
   previewHeight?: number | null
   createdAt?: Date | string
   currentFor?: Prisma.FileUncheckedCreateNestedOneWithoutCurrentVersionInput
+  processingFailures?: Prisma.ProcessingFailureUncheckedCreateNestedManyWithoutVersionInput
 }
 
 export type FileVersionCreateOrConnectWithoutStoredObjectInput = {
@@ -986,6 +1020,98 @@ export type FileVersionUpdateWithWhereUniqueWithoutStoredObjectInput = {
 export type FileVersionUpdateManyWithWhereWithoutStoredObjectInput = {
   where: Prisma.FileVersionScalarWhereInput
   data: Prisma.XOR<Prisma.FileVersionUpdateManyMutationInput, Prisma.FileVersionUncheckedUpdateManyWithoutStoredObjectInput>
+}
+
+export type FileVersionCreateWithoutProcessingFailuresInput = {
+  id?: string
+  versionNumber: number
+  originalName: string
+  mimeType?: string | null
+  size: bigint | number
+  imageWidth?: number | null
+  imageHeight?: number | null
+  imageFormat?: string | null
+  previewObjectKey?: string | null
+  previewMimeType?: string | null
+  previewWidth?: number | null
+  previewHeight?: number | null
+  createdAt?: Date | string
+  file: Prisma.FileCreateNestedOneWithoutVersionsInput
+  storedObject: Prisma.StoredObjectCreateNestedOneWithoutVersionsInput
+  currentFor?: Prisma.FileCreateNestedOneWithoutCurrentVersionInput
+}
+
+export type FileVersionUncheckedCreateWithoutProcessingFailuresInput = {
+  id?: string
+  fileId: string
+  storedObjectId: string
+  versionNumber: number
+  originalName: string
+  mimeType?: string | null
+  size: bigint | number
+  imageWidth?: number | null
+  imageHeight?: number | null
+  imageFormat?: string | null
+  previewObjectKey?: string | null
+  previewMimeType?: string | null
+  previewWidth?: number | null
+  previewHeight?: number | null
+  createdAt?: Date | string
+  currentFor?: Prisma.FileUncheckedCreateNestedOneWithoutCurrentVersionInput
+}
+
+export type FileVersionCreateOrConnectWithoutProcessingFailuresInput = {
+  where: Prisma.FileVersionWhereUniqueInput
+  create: Prisma.XOR<Prisma.FileVersionCreateWithoutProcessingFailuresInput, Prisma.FileVersionUncheckedCreateWithoutProcessingFailuresInput>
+}
+
+export type FileVersionUpsertWithoutProcessingFailuresInput = {
+  update: Prisma.XOR<Prisma.FileVersionUpdateWithoutProcessingFailuresInput, Prisma.FileVersionUncheckedUpdateWithoutProcessingFailuresInput>
+  create: Prisma.XOR<Prisma.FileVersionCreateWithoutProcessingFailuresInput, Prisma.FileVersionUncheckedCreateWithoutProcessingFailuresInput>
+  where?: Prisma.FileVersionWhereInput
+}
+
+export type FileVersionUpdateToOneWithWhereWithoutProcessingFailuresInput = {
+  where?: Prisma.FileVersionWhereInput
+  data: Prisma.XOR<Prisma.FileVersionUpdateWithoutProcessingFailuresInput, Prisma.FileVersionUncheckedUpdateWithoutProcessingFailuresInput>
+}
+
+export type FileVersionUpdateWithoutProcessingFailuresInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  versionNumber?: Prisma.IntFieldUpdateOperationsInput | number
+  originalName?: Prisma.StringFieldUpdateOperationsInput | string
+  mimeType?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  size?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  imageWidth?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  imageHeight?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  imageFormat?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  previewObjectKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  previewMimeType?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  previewWidth?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  previewHeight?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  file?: Prisma.FileUpdateOneRequiredWithoutVersionsNestedInput
+  storedObject?: Prisma.StoredObjectUpdateOneRequiredWithoutVersionsNestedInput
+  currentFor?: Prisma.FileUpdateOneWithoutCurrentVersionNestedInput
+}
+
+export type FileVersionUncheckedUpdateWithoutProcessingFailuresInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  fileId?: Prisma.StringFieldUpdateOperationsInput | string
+  storedObjectId?: Prisma.StringFieldUpdateOperationsInput | string
+  versionNumber?: Prisma.IntFieldUpdateOperationsInput | number
+  originalName?: Prisma.StringFieldUpdateOperationsInput | string
+  mimeType?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  size?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  imageWidth?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  imageHeight?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  imageFormat?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  previewObjectKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  previewMimeType?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  previewWidth?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  previewHeight?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  currentFor?: Prisma.FileUncheckedUpdateOneWithoutCurrentVersionNestedInput
 }
 
 export type FileVersionCreateManyFileInput = {
@@ -1021,6 +1147,7 @@ export type FileVersionUpdateWithoutFileInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   storedObject?: Prisma.StoredObjectUpdateOneRequiredWithoutVersionsNestedInput
   currentFor?: Prisma.FileUpdateOneWithoutCurrentVersionNestedInput
+  processingFailures?: Prisma.ProcessingFailureUpdateManyWithoutVersionNestedInput
 }
 
 export type FileVersionUncheckedUpdateWithoutFileInput = {
@@ -1039,6 +1166,7 @@ export type FileVersionUncheckedUpdateWithoutFileInput = {
   previewHeight?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   currentFor?: Prisma.FileUncheckedUpdateOneWithoutCurrentVersionNestedInput
+  processingFailures?: Prisma.ProcessingFailureUncheckedUpdateManyWithoutVersionNestedInput
 }
 
 export type FileVersionUncheckedUpdateManyWithoutFileInput = {
@@ -1091,6 +1219,7 @@ export type FileVersionUpdateWithoutStoredObjectInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   file?: Prisma.FileUpdateOneRequiredWithoutVersionsNestedInput
   currentFor?: Prisma.FileUpdateOneWithoutCurrentVersionNestedInput
+  processingFailures?: Prisma.ProcessingFailureUpdateManyWithoutVersionNestedInput
 }
 
 export type FileVersionUncheckedUpdateWithoutStoredObjectInput = {
@@ -1109,6 +1238,7 @@ export type FileVersionUncheckedUpdateWithoutStoredObjectInput = {
   previewHeight?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   currentFor?: Prisma.FileUncheckedUpdateOneWithoutCurrentVersionNestedInput
+  processingFailures?: Prisma.ProcessingFailureUncheckedUpdateManyWithoutVersionNestedInput
 }
 
 export type FileVersionUncheckedUpdateManyWithoutStoredObjectInput = {
@@ -1128,6 +1258,35 @@ export type FileVersionUncheckedUpdateManyWithoutStoredObjectInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
+
+/**
+ * Count Type FileVersionCountOutputType
+ */
+
+export type FileVersionCountOutputType = {
+  processingFailures: number
+}
+
+export type FileVersionCountOutputTypeSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  processingFailures?: boolean | FileVersionCountOutputTypeCountProcessingFailuresArgs
+}
+
+/**
+ * FileVersionCountOutputType without action
+ */
+export type FileVersionCountOutputTypeDefaultArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the FileVersionCountOutputType
+   */
+  select?: Prisma.FileVersionCountOutputTypeSelect<ExtArgs> | null
+}
+
+/**
+ * FileVersionCountOutputType without action
+ */
+export type FileVersionCountOutputTypeCountProcessingFailuresArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.ProcessingFailureWhereInput
+}
 
 
 export type FileVersionSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -1149,6 +1308,8 @@ export type FileVersionSelect<ExtArgs extends runtime.Types.Extensions.InternalA
   file?: boolean | Prisma.FileDefaultArgs<ExtArgs>
   storedObject?: boolean | Prisma.StoredObjectDefaultArgs<ExtArgs>
   currentFor?: boolean | Prisma.FileVersion$currentForArgs<ExtArgs>
+  processingFailures?: boolean | Prisma.FileVersion$processingFailuresArgs<ExtArgs>
+  _count?: boolean | Prisma.FileVersionCountOutputTypeDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["fileVersion"]>
 
 export type FileVersionSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -1214,6 +1375,8 @@ export type FileVersionInclude<ExtArgs extends runtime.Types.Extensions.Internal
   file?: boolean | Prisma.FileDefaultArgs<ExtArgs>
   storedObject?: boolean | Prisma.StoredObjectDefaultArgs<ExtArgs>
   currentFor?: boolean | Prisma.FileVersion$currentForArgs<ExtArgs>
+  processingFailures?: boolean | Prisma.FileVersion$processingFailuresArgs<ExtArgs>
+  _count?: boolean | Prisma.FileVersionCountOutputTypeDefaultArgs<ExtArgs>
 }
 export type FileVersionIncludeCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   file?: boolean | Prisma.FileDefaultArgs<ExtArgs>
@@ -1230,6 +1393,7 @@ export type $FileVersionPayload<ExtArgs extends runtime.Types.Extensions.Interna
     file: Prisma.$FilePayload<ExtArgs>
     storedObject: Prisma.$StoredObjectPayload<ExtArgs>
     currentFor: Prisma.$FilePayload<ExtArgs> | null
+    processingFailures: Prisma.$ProcessingFailurePayload<ExtArgs>[]
   }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
@@ -1644,6 +1808,7 @@ export interface Prisma__FileVersionClient<T, Null = never, ExtArgs extends runt
   file<T extends Prisma.FileDefaultArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.FileDefaultArgs<ExtArgs>>): Prisma.Prisma__FileClient<runtime.Types.Result.GetResult<Prisma.$FilePayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
   storedObject<T extends Prisma.StoredObjectDefaultArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.StoredObjectDefaultArgs<ExtArgs>>): Prisma.Prisma__StoredObjectClient<runtime.Types.Result.GetResult<Prisma.$StoredObjectPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
   currentFor<T extends Prisma.FileVersion$currentForArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.FileVersion$currentForArgs<ExtArgs>>): Prisma.Prisma__FileClient<runtime.Types.Result.GetResult<Prisma.$FilePayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
+  processingFailures<T extends Prisma.FileVersion$processingFailuresArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.FileVersion$processingFailuresArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$ProcessingFailurePayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   /**
    * Attaches callbacks for the resolution and/or rejection of the Promise.
    * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -2105,6 +2270,30 @@ export type FileVersion$currentForArgs<ExtArgs extends runtime.Types.Extensions.
    */
   include?: Prisma.FileInclude<ExtArgs> | null
   where?: Prisma.FileWhereInput
+}
+
+/**
+ * FileVersion.processingFailures
+ */
+export type FileVersion$processingFailuresArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the ProcessingFailure
+   */
+  select?: Prisma.ProcessingFailureSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the ProcessingFailure
+   */
+  omit?: Prisma.ProcessingFailureOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.ProcessingFailureInclude<ExtArgs> | null
+  where?: Prisma.ProcessingFailureWhereInput
+  orderBy?: Prisma.ProcessingFailureOrderByWithRelationInput | Prisma.ProcessingFailureOrderByWithRelationInput[]
+  cursor?: Prisma.ProcessingFailureWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.ProcessingFailureScalarFieldEnum | Prisma.ProcessingFailureScalarFieldEnum[]
 }
 
 /**

@@ -19,6 +19,7 @@ import {
 } from '../storage/object-storage.interface';
 import type { PublicFileResponseDto } from './dto/public-file-response.dto';
 import type { PublicFolderResponseDto } from './dto/public-folder-response.dto';
+import { AuditService } from '../audit/audit.service';
 
 const PUBLIC_LINK_SELECT = {
   id: true,
@@ -34,6 +35,7 @@ export class PublicLinksService {
     private readonly accessService: AccessService,
     @Inject(OBJECT_STORAGE)
     private readonly objectStorage: ObjectStorage,
+    private readonly auditService: AuditService,
   ) {}
 
   async createFolderLink(
@@ -54,6 +56,18 @@ export class PublicLinksService {
         expiresAt,
       },
       select: PUBLIC_LINK_SELECT,
+    });
+
+    await this.auditService.write({
+      actorUserId: userId,
+      action: 'PUBLIC_LINK_CREATE',
+      resourceType: 'PUBLIC_LINK',
+      resourceId: link.id,
+      metadata: {
+        targetType: 'FOLDER',
+        targetId: folderId,
+        expiresAt: link.expiresAt?.toISOString() ?? null,
+      },
     });
 
     return {
@@ -113,6 +127,17 @@ export class PublicLinksService {
         revokedAt: new Date(),
       },
     });
+
+    await this.auditService.write({
+      actorUserId: userId,
+      action: 'PUBLIC_LINK_REVOKE',
+      resourceType: 'PUBLIC_LINK',
+      resourceId: link.id,
+      metadata: {
+        targetType: 'FOLDER',
+        targetId: folderId,
+      },
+    });
   }
 
   async createFileLink(
@@ -133,6 +158,18 @@ export class PublicLinksService {
         expiresAt,
       },
       select: PUBLIC_LINK_SELECT,
+    });
+
+    await this.auditService.write({
+      actorUserId: userId,
+      action: 'PUBLIC_LINK_CREATE',
+      resourceType: 'PUBLIC_LINK',
+      resourceId: link.id,
+      metadata: {
+        targetType: 'FILE',
+        targetId: fileId,
+        expiresAt: link.expiresAt?.toISOString() ?? null,
+      },
     });
 
     return {
@@ -190,6 +227,17 @@ export class PublicLinksService {
       },
       data: {
         revokedAt: new Date(),
+      },
+    });
+
+    await this.auditService.write({
+      actorUserId: userId,
+      action: 'PUBLIC_LINK_REVOKE',
+      resourceType: 'PUBLIC_LINK',
+      resourceId: link.id,
+      metadata: {
+        targetType: 'FILE',
+        targetId: fileId,
       },
     });
   }

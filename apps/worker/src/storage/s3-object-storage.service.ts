@@ -7,12 +7,18 @@ import {
   S3Client,
   S3ServiceException,
   DeleteObjectCommand,
+  AbortMultipartUploadCommand,
+  ListObjectsV2Command,
+  HeadObjectCommand,
 } from '@aws-sdk/client-s3';
 import { Readable } from 'node:stream';
 import {
   ObjectNotFoundError,
   type ObjectStorage,
   type PutObjectInput,
+  type AbortMultipartUploadInput,
+  type ListObjectsInput,
+  type ListObjectsResult,
 } from './object-storage.interface';
 
 @Injectable()
@@ -94,6 +100,82 @@ export class S3ObjectStorageService implements ObjectStorage, OnModuleDestroy {
         Key: objectKey,
       }),
     );
+  }
+
+  async abortMultipartUpload(input: AbortMultipartUploadInput): Promise<void> {
+    try {
+      await this.client.send(
+        new AbortMultipartUploadCommand({
+          Bucket: this.bucket,
+          Key: input.objectKey,
+          UploadId: input.uploadId,
+        }),
+      );
+    } catch (error: unknown) {
+      if (
+        error instanceof S3ServiceException &&
+        error.$metadata.httpStatusCode === 404
+      ) {
+        return;
+      }
+
+      throw error;
+    }
+  }
+
+  async listObjects(input: ListObjectsInput = {}): Promise<ListObjectsResult> {
+    const result = await this.client.send(
+      new ListObjectsV2Command({
+        Bucket: this.bucket,
+        ContinuationToken: input.continuationToken,
+        MaxKeys: input.maxKeys,
+      }),
+    );
+
+    const objects =
+      result.Contents?.flatMap((object) => {
+        if (!object.Key) {
+          return [];
+        }
+
+        return [
+          {
+            objectKey: object.Key,
+            size: object.Size ?? 0,
+            lastModified: object.LastModified ?? null,
+          },
+        ];
+      }) ?? [];
+
+    return {
+      objects,
+      nextContinuationToken:
+        result.IsTruncated && result.NextContinuationToken
+          ? result.NextContinuationToken
+          : null,
+    };
+  }
+
+  async objectExists(objectKey: string): Promise<boolean> {
+    try {
+      await this.client.send(
+        new HeadObjectCommand({
+          Bucket: this.bucket,
+          Key: objectKey,
+        }),
+      );
+
+      return true;
+    } catch (error: unknown) {
+      if (
+        error instanceof S3ServiceException &&
+        error.$metadata.httpStatusCode === 404
+      ) {
+        return false;
+      }
+
+      throw error;
+    }
   }
 
   onModuleDestroy(): void {

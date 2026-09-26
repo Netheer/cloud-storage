@@ -12,6 +12,7 @@ import type { ShareResponseDto } from './dto/share-response.dto';
 import type { UpdateShareDto } from './dto/update-share.dto';
 import type { SharedFolderResponseDto } from './dto/shared-folder-response.dto';
 import type { SharedFileResponseDto } from './dto/shared-file-response.dto';
+import { AuditService } from '../audit/audit.service';
 
 export type EffectiveAccessRole = 'OWNER' | 'EDITOR' | 'VIEWER';
 
@@ -39,7 +40,10 @@ const ACCESS_ROLE_WEIGHT: Record<EffectiveAccessRole, number> = {
 
 @Injectable()
 export class AccessService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+  ) {}
 
   async getFolderRole(
     userId: string,
@@ -267,6 +271,19 @@ export class AccessService {
       },
     });
 
+    await this.auditService.write({
+      actorUserId: userId,
+      action: 'SHARE_CREATE',
+      resourceType: 'SHARE',
+      resourceId: grant.id,
+      metadata: {
+        targetType: 'FOLDER',
+        targetId: folderId,
+        targetUserId: targetUser.id,
+        role: this.normalizeShareRole(grant.role),
+      },
+    });
+
     return {
       id: grant.id,
       userId: targetUser.id,
@@ -293,6 +310,8 @@ export class AccessService {
       },
       select: {
         id: true,
+        role: true,
+        userId: true,
       },
     });
 
@@ -322,6 +341,20 @@ export class AccessService {
       },
     });
 
+    await this.auditService.write({
+      actorUserId: userId,
+      action: 'SHARE_UPDATE',
+      resourceType: 'SHARE',
+      resourceId: grant.id,
+      metadata: {
+        targetType: 'FOLDER',
+        targetId: folderId,
+        targetUserId: existingGrant.userId,
+        oldRole: this.normalizeShareRole(existingGrant.role),
+        newRole: this.normalizeShareRole(grant.role),
+      },
+    });
+
     return {
       id: grant.id,
       userId: grant.user.id,
@@ -340,16 +373,40 @@ export class AccessService {
   ): Promise<void> {
     await this.requireFolderRole(userId, folderId, 'OWNER');
 
-    const result = await this.prisma.folderAccessGrant.deleteMany({
+    const grant = await this.prisma.folderAccessGrant.findFirst({
       where: {
         id: grantId,
         folderId,
       },
+      select: {
+        id: true,
+        userId: true,
+        role: true,
+      },
     });
 
-    if (result.count === 0) {
+    if (!grant) {
       throw new NotFoundException('Folder share not found');
     }
+
+    await this.prisma.folderAccessGrant.delete({
+      where: {
+        id: grant.id,
+      },
+    });
+
+    await this.auditService.write({
+      actorUserId: userId,
+      action: 'SHARE_REVOKE',
+      resourceType: 'SHARE',
+      resourceId: grant.id,
+      metadata: {
+        targetType: 'FOLDER',
+        targetId: folderId,
+        targetUserId: grant.userId,
+        role: this.normalizeShareRole(grant.role),
+      },
+    });
   }
 
   async listFileShares(
@@ -419,15 +476,6 @@ export class AccessService {
       );
     }
 
-    /*
-     * Проверяем только direct file grant.
-     *
-     * Наличие inherited folder grant
-     * НЕ является конфликтом:
-     *
-     * folder EDITOR + file VIEWER
-     * => effective role VIEWER
-     */
     const existingGrant = await this.prisma.fileAccessGrant.findUnique({
       where: {
         fileId_userId: {
@@ -458,6 +506,19 @@ export class AccessService {
       },
     });
 
+    await this.auditService.write({
+      actorUserId: userId,
+      action: 'SHARE_CREATE',
+      resourceType: 'SHARE',
+      resourceId: grant.id,
+      metadata: {
+        targetType: 'FILE',
+        targetId: fileId,
+        targetUserId: targetUser.id,
+        role: this.normalizeShareRole(grant.role),
+      },
+    });
+
     return {
       id: grant.id,
       userId: targetUser.id,
@@ -484,6 +545,8 @@ export class AccessService {
       },
       select: {
         id: true,
+        role: true,
+        userId: true,
       },
     });
 
@@ -513,6 +576,20 @@ export class AccessService {
       },
     });
 
+    await this.auditService.write({
+      actorUserId: userId,
+      action: 'SHARE_UPDATE',
+      resourceType: 'SHARE',
+      resourceId: grant.id,
+      metadata: {
+        targetType: 'FILE',
+        targetId: fileId,
+        targetUserId: existingGrant.userId,
+        oldRole: this.normalizeShareRole(existingGrant.role),
+        newRole: this.normalizeShareRole(grant.role),
+      },
+    });
+
     return {
       id: grant.id,
       userId: grant.user.id,
@@ -531,16 +608,40 @@ export class AccessService {
   ): Promise<void> {
     await this.requireFileRole(userId, fileId, 'OWNER');
 
-    const result = await this.prisma.fileAccessGrant.deleteMany({
+    const grant = await this.prisma.fileAccessGrant.findFirst({
       where: {
         id: grantId,
         fileId,
       },
+      select: {
+        id: true,
+        userId: true,
+        role: true,
+      },
     });
 
-    if (result.count === 0) {
+    if (!grant) {
       throw new NotFoundException('File share not found');
     }
+
+    await this.prisma.fileAccessGrant.delete({
+      where: {
+        id: grant.id,
+      },
+    });
+
+    await this.auditService.write({
+      actorUserId: userId,
+      action: 'SHARE_REVOKE',
+      resourceType: 'SHARE',
+      resourceId: grant.id,
+      metadata: {
+        targetType: 'FILE',
+        targetId: fileId,
+        targetUserId: grant.userId,
+        role: this.normalizeShareRole(grant.role),
+      },
+    });
   }
 
   async requireFileRole(

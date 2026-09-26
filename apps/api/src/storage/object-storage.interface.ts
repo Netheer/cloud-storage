@@ -63,6 +63,22 @@ export interface ObjectMetadata {
   etag?: string;
 }
 
+export interface ListObjectsInput {
+  continuationToken?: string;
+  maxKeys?: number;
+}
+
+export interface ListedObject {
+  objectKey: string;
+  size: number;
+  lastModified: Date | null;
+}
+
+export interface ListObjectsResult {
+  objects: ListedObject[];
+  nextContinuationToken: string | null;
+}
+
 export interface ObjectStorage {
   checkHealth(): Promise<void>;
 
@@ -91,4 +107,8 @@ export interface ObjectStorage {
   completeMultipartUpload(input: CompleteMultipartUploadInput): Promise<void>;
 
   abortMultipartUpload(input: AbortMultipartUploadInput): Promise<void>;
+
+  listObjects(input?: ListObjectsInput): Promise<ListObjectsResult>;
+
+  objectExists(objectKey: string): Promise<boolean>;
 }

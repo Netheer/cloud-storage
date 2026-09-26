@@ -11,6 +11,7 @@ import type { CreateFolderDto } from './dto/create-folder.dto';
 import type { FolderResponseDto } from './dto/folder-response.dto';
 import type { MoveFolderDto } from './dto/move-folder.dto';
 import type { RenameFolderDto } from './dto/rename-folder.dto';
+import { AuditService } from '../audit/audit.service';
 
 const FOLDER_SELECT = {
   id: true,
@@ -26,6 +27,7 @@ export class FoldersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly accessService: AccessService,
+    private readonly auditService: AuditService,
   ) {}
 
   async create(
@@ -35,7 +37,7 @@ export class FoldersService {
     const parentId = dto.parentId ?? null;
 
     if (!parentId) {
-      return this.prisma.folder.create({
+      const folder = await this.prisma.folder.create({
         data: {
           name: dto.name,
           ownerId: userId,
@@ -43,6 +45,19 @@ export class FoldersService {
         },
         select: FOLDER_SELECT,
       });
+
+      await this.auditService.write({
+        actorUserId: userId,
+        action: 'FOLDER_CREATE',
+        resourceType: 'FOLDER',
+        resourceId: folder.id,
+        metadata: {
+          name: folder.name,
+          parentId: null,
+        },
+      });
+
+      return folder;
     }
 
     await this.accessService.requireFolderRole(userId, parentId, 'EDITOR');
@@ -62,7 +77,7 @@ export class FoldersService {
       throw new NotFoundException('Parent folder not found');
     }
 
-    return this.prisma.folder.create({
+    const folder = await this.prisma.folder.create({
       data: {
         name: dto.name,
         ownerId: parent.ownerId,
@@ -70,6 +85,19 @@ export class FoldersService {
       },
       select: FOLDER_SELECT,
     });
+
+    await this.auditService.write({
+      actorUserId: userId,
+      action: 'FOLDER_CREATE',
+      resourceType: 'FOLDER',
+      resourceId: folder.id,
+      metadata: {
+        name: folder.name,
+        parentId,
+      },
+    });
+
+    return folder;
   }
 
   async list(userId: string, parentId?: string): Promise<FolderResponseDto[]> {
@@ -117,7 +145,20 @@ export class FoldersService {
   ): Promise<FolderResponseDto> {
     await this.accessService.requireFolderRole(userId, folderId, 'EDITOR');
 
-    return this.prisma.folder.update({
+    const currentFolder = await this.prisma.folder.findUnique({
+      where: {
+        id: folderId,
+      },
+      select: {
+        name: true,
+      },
+    });
+
+    if (!currentFolder) {
+      throw new NotFoundException('Folder not found');
+    }
+
+    const folder = await this.prisma.folder.update({
       where: {
         id: folderId,
       },
@@ -126,6 +167,19 @@ export class FoldersService {
       },
       select: FOLDER_SELECT,
     });
+
+    await this.auditService.write({
+      actorUserId: userId,
+      action: 'FOLDER_RENAME',
+      resourceType: 'FOLDER',
+      resourceId: folder.id,
+      metadata: {
+        oldName: currentFolder.name,
+        newName: folder.name,
+      },
+    });
+
+    return folder;
   }
 
   async move(
@@ -157,7 +211,7 @@ export class FoldersService {
         );
       }
 
-      return this.prisma.folder.update({
+      const folder = await this.prisma.folder.update({
         where: {
           id: folderId,
         },
@@ -166,6 +220,18 @@ export class FoldersService {
         },
         select: FOLDER_SELECT,
       });
+
+      await this.auditService.write({
+        actorUserId: userId,
+        action: 'FOLDER_MOVE',
+        resourceType: 'FOLDER',
+        resourceId: folder.id,
+        metadata: {
+          destinationParentId: null,
+        },
+      });
+
+      return folder;
     }
 
     await this.accessService.requireFolderRole(userId, dto.parentId, 'EDITOR');
@@ -197,7 +263,7 @@ export class FoldersService {
       dto.parentId,
     );
 
-    return this.prisma.folder.update({
+    const folder = await this.prisma.folder.update({
       where: {
         id: folderId,
       },
@@ -206,6 +272,18 @@ export class FoldersService {
       },
       select: FOLDER_SELECT,
     });
+
+    await this.auditService.write({
+      actorUserId: userId,
+      action: 'FOLDER_MOVE',
+      resourceType: 'FOLDER',
+      resourceId: folder.id,
+      metadata: {
+        destinationParentId: dto.parentId,
+      },
+    });
+
+    return folder;
   }
 
   async remove(ownerId: string, folderId: string): Promise<void> {
@@ -227,6 +305,13 @@ export class FoldersService {
     });
 
     if (result.count === 1) {
+      await this.auditService.write({
+        actorUserId: ownerId,
+        action: 'FOLDER_DELETE',
+        resourceType: 'FOLDER',
+        resourceId: folderId,
+      });
+
       return;
     }
 

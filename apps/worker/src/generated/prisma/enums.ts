@@ -41,3 +41,43 @@ export const AccessRole = {
 } as const
 
 export type AccessRole = (typeof AccessRole)[keyof typeof AccessRole]
+
+
+export const ProcessingFailureKind = {
+  RECOVERABLE_EXHAUSTED: 'RECOVERABLE_EXHAUSTED',
+  UNRECOVERABLE: 'UNRECOVERABLE'
+} as const
+
+export type ProcessingFailureKind = (typeof ProcessingFailureKind)[keyof typeof ProcessingFailureKind]
+
+
+export const AuditAction = {
+  FILE_UPLOAD: 'FILE_UPLOAD',
+  FILE_DELETE: 'FILE_DELETE',
+  FILE_RENAME: 'FILE_RENAME',
+  FILE_MOVE: 'FILE_MOVE',
+  FILE_VERSION_UPLOAD: 'FILE_VERSION_UPLOAD',
+  FILE_VERSION_RESTORE: 'FILE_VERSION_RESTORE',
+  FILE_PROCESSING_RETRY: 'FILE_PROCESSING_RETRY',
+  FOLDER_CREATE: 'FOLDER_CREATE',
+  FOLDER_DELETE: 'FOLDER_DELETE',
+  FOLDER_RENAME: 'FOLDER_RENAME',
+  FOLDER_MOVE: 'FOLDER_MOVE',
+  SHARE_CREATE: 'SHARE_CREATE',
+  SHARE_UPDATE: 'SHARE_UPDATE',
+  SHARE_REVOKE: 'SHARE_REVOKE',
+  PUBLIC_LINK_CREATE: 'PUBLIC_LINK_CREATE',
+  PUBLIC_LINK_REVOKE: 'PUBLIC_LINK_REVOKE'
+} as const
+
+export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction]
+
+
+export const AuditResourceType = {
+  FILE: 'FILE',
+  FOLDER: 'FOLDER',
+  SHARE: 'SHARE',
+  PUBLIC_LINK: 'PUBLIC_LINK'
+} as const
+
+export type AuditResourceType = (typeof AuditResourceType)[keyof typeof AuditResourceType]
